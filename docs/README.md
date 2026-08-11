@@ -13,7 +13,7 @@ A change that survives is a **survived mutant** — a precise pointer at a missi
 |---|---|
 | [concepts.md](concepts.md) | The mutation score, the seven statuses, why `Invalid`, `NoCoverage` and `Equivalent` are excluded, the baseline gate, coverage-aware suite selection, and why workers are subprocesses |
 | [cli-reference.md](cli-reference.md) | Every flag, grouped, with defaults, validation rules and exit codes |
-| [mutators.md](mutators.md) | All eight mutators, with a real before/after and the weak assertion each one exposes |
+| [mutators.md](mutators.md) | All nine mutators, with a real before/after and the weak assertion each one exposes |
 | [reports.md](reports.md) | All five report formats, with real sample output and when to use each |
 
 ## Why it matters: one chart, two green suites

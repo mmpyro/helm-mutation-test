@@ -41,7 +41,7 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | package | responsibility |
 |---|---|
 | `internal/source` | Load chart files; locate mutations via parser, apply as byte edits |
-| `internal/mutator` | The 8 mutators + registry + deterministic plan generation |
+| `internal/mutator` | The 9 mutators + registry + deterministic plan generation |
 | `internal/coverage` | Map a chart file to the suites that render it. Dependency-free by design |
 | `internal/workspace` | Per-worker chart copies; write/restore a mutation |
 | `internal/runner` | helm-unittest seam, baseline gate, executor, classification, session |
@@ -159,6 +159,19 @@ runs equivalence detection over every `Killed` mutant in the fixture and asserts
 zero equivalent verdicts, since a killed mutant demonstrably changed something a
 test observed and so must render differently under some covering context.
 
+**A pipeline's variable declarations are part of its `Position()`.** `RangeNode`'s
+`Pipe.Position()` for `{{ range $k, $v := .Values.m }}` is the offset of `$k`, not of
+`.Values.m`. Replacing the whole pipeline leaves the body's `$k` and `$v` undeclared,
+so the mutant fails to *parse* — becoming `Invalid`, which grades nothing. The same
+rewrite in the equivalence probe is worse than useless: an unparseable probe fails for
+a reason unrelated to execution, and `sameOutcome` reads any difference from the
+original as proof the span ran, so it promotes killable mutants to `Equivalent` and
+raises the score. It fired on the `{{- $fullName := include "chart.fullname" . -}}`
+that `helm create` scaffolds into every chart, which is why no fixture caught it.
+`source.cutDeclarations` is the single definition both `SpanOfRangedExpression` and
+`EnclosingPipelineSpan` use; `ProbeBytes` additionally refuses any probe that will not
+parse. Pinned by `TestProbeSpanPreservesVariableDeclarations` and `TestCutDeclarations`.
+
 **pflag's `UnquoteUsage` eats backticks.** The first backquoted string in a flag's
 usage becomes its displayed value type, so a backtick in a `Describe()` string
 turned `--mutators strings` into `--mutators | default X`. Keep mutator
@@ -194,10 +207,15 @@ saying *why* the property matters when it is not obvious. Keep that style.
   and the strong one over 70%. If you change the chart or a mutator, re-check
   `TestWeakSuiteScoresLowAndStrongScoresHigh` — it is the end-to-end guard, and CI
   also fails if the weak suite ever scores above 50%.
-- **`testdata/charts/shortcircuit` is a second fixture, deliberately separate.** It
-  exists only to exercise the short-circuited-operand case above. Keep new
-  single-purpose fixtures out of `sample`: adding a template there changes the
-  measured scores quoted in `README.md`, `docs/` and the pinned session tests.
+- **`testdata/charts/shortcircuit` and `testdata/charts/rangeloop` are separate
+  fixtures, deliberately.** The first exists only to exercise the
+  short-circuited-operand case above. The second exercises `range`, which `sample`
+  contains none of: three loops — a list and a map that separate a weak suite from a
+  strong one, and an `extras: []` loop whose mutant is genuinely `Equivalent`. Pinned
+  by `TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne` and
+  `TestEmptyRangeIsJudgedEquivalent`. Keep new single-purpose fixtures out of
+  `sample`: adding a template there changes the measured scores quoted in
+  `README.md`, `docs/` and the pinned session tests.
 - `internal/runner/baseline_test.go`'s `TestMain` doubles as the worker entry point
   so tests exercise the real subprocess protocol rather than a stand-in. Do not
   remove `SetWorkerArgs`.

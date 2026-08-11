@@ -1,6 +1,6 @@
 # Mutators
 
-Eight mutators, each producing one kind of small, single-site change. Every one reports a byte-range
+Nine mutators, each producing one kind of small, single-site change. Every one reports a byte-range
 edit against the *original* file bytes; nothing is ever rewritten in place. That keeps formatting
 exact — including Helm's whitespace-sensitive `{{-` trim markers — and lets a worker apply and revert
 one edit cheaply.
@@ -20,13 +20,18 @@ once against its deliberately weak 4-test suite and once against its thorough 43
 | [`cond-negate`](#cond-negate) | `if` / `else if` / `with` conditions | 19 | 0 | 0/10 | 19/0 |
 | [`default-drop`](#default-drop) | `\| default X` pipeline segments | 7 | 0 | 0/4 | 7/0 |
 | [`num-literal`](#num-literal) | numeric literals | 87 | 5 | 0/55 | 68/14 |
+| [`range-empty`](#range-empty) | `range` loop expressions | 0 | 0 | — | — |
 | [`required-drop`](#required-drop) | `required` guards | 3 | 0 | 0/2 | 3/0 |
 | [`str-literal`](#str-literal) | string literals | 83 | 0 | 2/52 | 83/0 |
 | [`yaml-key-delete`](#yaml-key-delete) | a key and its nested block | 231 | 15 | 4/135 | 209/7 |
 
+`range-empty` shows zero because `testdata/charts/sample` contains no `range` at all. It is measured
+against [`testdata/charts/rangeloop`](#range-empty) instead. A mutator that generated nothing is as
+worth naming as a status that scored nothing — a blank row would read as "ran and found no weakness".
+
 `k/s` is killed/survived, counting a mutant as "survived" whenever every covering test still passed —
 the raw outcome before the tool's automatic equivalence check runs. The weak suite's zeros are the
-headline: **six of the eight mutators score 0.0% against it**, because a suite of `isKind` and `exists`
+headline: **six of the mutators that fire on this chart score 0.0% against it**, because a suite of `isKind` and `exists`
 assertions cannot notice *anything* about content. Its weak-column totals are smaller than the mutant
 totals because it declares only two of the chart's seven templates, so the rest are `NoCoverage`.
 
@@ -67,6 +72,7 @@ answer.
 | `cond-negate` | ✔ | | |
 | `default-drop` | ✔ | | |
 | `num-literal` | ✔ | ✔ | ✔ |
+| `range-empty` | ✔ | | |
 | `required-drop` | ✔ | | |
 | `str-literal` | ✔ | ✔ | ✔ |
 | `yaml-key-delete` | | ✔ (line-based) | ✔ (node tree) |
@@ -370,6 +376,60 @@ fields nobody asserts at all.
 that checks presence rather than value is blind to this entire mutator — which is why the weak suite
 scores 0.0% on all 55 of its scored `num-literal` mutants. The strong suite kills 68 of 82, 65 of them
 by plain `equal`.
+
+---
+
+## `range-empty`
+
+**Force a `range` loop to iterate zero times: `range X` → `range list`.**
+
+`list` is sprig's empty-list constructor, so the loop body never runs and everything it produced
+disappears from the manifest. Variable declarations are preserved: `range $k, $v := X` becomes
+`range $k, $v := list`, because dropping them leaves the body's `$k` and `$v` undeclared and the
+template no longer parses — an unparseable mutant is `Invalid`, caught by every test regardless of
+what it asserts, and grades nothing.
+
+**Before / after.** A list, `testdata/charts/rangeloop/templates/configmap.yaml:7`:
+
+```diff
+-   {{- range .Values.ports }}
++   {{- range list }}
+```
+
+A map, where the declarations survive — `:10`:
+
+```diff
+-   {{- range $k, $v := .Values.labels }}
++   {{- range $k, $v := list }}
+```
+
+The whole expression is replaced, not just its first term, so a piped source collapses too:
+
+```diff
+- {{- range .Values.hosts | sortAlpha }}
++ {{- range list }}
+```
+
+Where the `range` has an `{{ else }}`, the mutant renders the **else** branch rather than nothing.
+That is still a change to the manifest, so it is still a useful mutant — but "the block disappears"
+is the wrong intuition for that shape.
+
+**Why it matters.** Before this mutator, loops were completely unmutated: `cond-negate` covers `if`
+and `with`, and nothing targeted `range`. Charts are full of them — env vars, ports, ingress hosts,
+volume mounts, image pull secrets — so a suite could assert nothing whatsoever about any loop's
+output and still score 100%. This is to `range` what `cond-negate` is to `if`.
+
+**The weak test it exposes.** A suite that checks a resource exists but never what its loops
+produced. `isKind` and a single `equal` on a static key cannot notice every port, label or host
+vanishing at once. Measured on `testdata/charts/rangeloop`, whose three loops yield three mutants:
+the weak suite kills **0 of 2** scored ones, the strong suite kills **2 of 2**.
+
+**When it is correctly excluded.** A loop over a collection that is empty under every covering test
+context cannot change what renders, so no assertion could catch it either. Those are reported as
+[`Equivalent`](concepts.md#equivalent-mutants) and leave the score's denominator, like any other
+unkillable mutant. `range` evaluates its pipeline even when the result is empty, so the execution
+probe can prove the loop was reached and the verdict rests on evidence rather than on a guess. The
+fixture's `extras: []` loop is exactly this case, and is reported `Equivalent` under both suites.
 
 ---
 

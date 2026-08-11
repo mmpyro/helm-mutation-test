@@ -44,8 +44,8 @@ func TestJSONReportIsCompleteAndSelfConsistent(t *testing.T) {
 	if diff := j.Score - want; diff > 0.01 || diff < -0.01 {
 		t.Errorf("score = %v, but killed/scored = %v", j.Score, want)
 	}
-	if len(j.Mutators) != 8 {
-		t.Errorf("mutators = %v, want all 8 by default", j.Mutators)
+	if len(j.Mutators) != 9 {
+		t.Errorf("mutators = %v, want all 9 by default", j.Mutators)
 	}
 	if len(j.Suites) == 0 || j.TestCount == 0 {
 		t.Errorf("suites = %d, testCount = %d, want both non-zero", len(j.Suites), j.TestCount)

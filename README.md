@@ -220,7 +220,7 @@ make demo    # score the fixture chart with both suites
 |---|---|
 | [Quickstart and index](docs/README.md) | installation, a first run, where to go next |
 | [CLI reference](docs/cli-reference.md) | every flag, with defaults and exit codes |
-| [Mutators](docs/mutators.md) | all eight mutators, with before/after examples |
+| [Mutators](docs/mutators.md) | all nine mutators, with before/after examples |
 | [Reports](docs/reports.md) | all five output formats, with samples |
 | [Concepts](docs/concepts.md) | the score, the six statuses, the baseline gate |
 

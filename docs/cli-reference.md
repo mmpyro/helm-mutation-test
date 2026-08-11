@@ -82,7 +82,7 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 
 | flag | type | default | purpose |
 |---|---|---|---|
-| `--mutators` | comma-separated list | *all eight* | Which mutators to run |
+| `--mutators` | comma-separated list | *all nine* | Which mutators to run |
 | `--exclude-mutators` | comma-separated list | *(none)* | Mutators to skip |
 | `--include` | comma-separated globs | `templates/**,values.yaml` | Chart files to mutate |
 | `--exclude` | comma-separated globs | *(none)* | Chart files to skip |
