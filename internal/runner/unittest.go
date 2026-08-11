@@ -4,6 +4,7 @@ package runner
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -12,9 +13,13 @@ import (
 	"github.com/helm-unittest/helm-unittest/pkg/unittest"
 	"github.com/helm-unittest/helm-unittest/pkg/unittest/results"
 	"github.com/helm-unittest/helm-unittest/pkg/unittest/snapshot"
+	"github.com/helm-unittest/helm-unittest/pkg/unittest/valueutils"
+	"github.com/mmpyro/helm-mutation-test/internal/equivalence"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 	v3chart "helm.sh/helm/v3/pkg/chart"
 	v3loader "helm.sh/helm/v3/pkg/chart/loader"
+	v3util "helm.sh/helm/v3/pkg/chartutil"
 )
 
 // This file is the ONLY place that imports helm-unittest. Everything downstream
@@ -279,4 +284,176 @@ func joinLines(lines []string) string {
 		out += l
 	}
 	return out
+}
+
+// UsesKubernetesProvider reports whether the suite installs a fake Kubernetes
+// client. Such a suite's `lookup` calls return objects our own renderer will not
+// see, so two renders could agree here that helm-unittest would find different.
+// Mutants covered by such a suite skip equivalence detection entirely.
+func (s *Suite) UsesKubernetesProvider() bool {
+	if s.suite == nil {
+		return false
+	}
+	if len(s.suite.KubernetesProvider.Objects) > 0 || s.suite.KubernetesProvider.Scheme != nil {
+		return true
+	}
+	for _, job := range s.suite.Tests {
+		if job == nil {
+			continue
+		}
+		if len(job.KubernetesProvider.Objects) > 0 || job.KubernetesProvider.Scheme != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RenderContexts returns one equivalence.RenderContext per non-skipped test job
+// in the suite.
+//
+// This reproduces the suite-to-job merge helm-unittest performs internally,
+// spread across ParseTestSuiteFile's initial polish pass and RunV3's
+// polishTestJobsPathInfo/getUserValues/releaseV3Option/capabilitiesV3: suite
+// values files are prepended to the job's, the suite's `set` acts as a global
+// set merged before the job's own, and suite-level release, chart and
+// capability settings fill in wherever the job leaves them empty. Every merge
+// below reads the suite's and job's own raw fields directly rather than calling
+// helm-unittest's polish methods, so the answer does not depend on whether
+// RunV3 has already mutated this *Suite.
+//
+// Reproducing it is the price of rendering under the values the tests actually
+// used, which is what makes an Equivalent verdict safe. It is also the most
+// likely thing here to go wrong, which is why
+// TestNoKilledMutantIsJudgedEquivalent exists.
+func RenderContexts(chartDir string, s *Suite) ([]equivalence.RenderContext, error) {
+	if s == nil || s.suite == nil {
+		return nil, nil
+	}
+	ts := s.suite
+	suiteDir := filepath.Dir(filepath.Join(chartDir, filepath.FromSlash(s.Key.File)))
+
+	out := make([]equivalence.RenderContext, 0, len(ts.Tests))
+	for i, job := range ts.Tests {
+		if job == nil || job.Skip.Reason != "" || ts.Skip.Reason != "" {
+			continue
+		}
+
+		values, err := mergedValues(suiteDir, ts, job)
+		if err != nil {
+			return nil, fmt.Errorf("%s: job %q: %w", s.Key, job.Name, err)
+		}
+
+		out = append(out, equivalence.RenderContext{
+			Name:            fmt.Sprintf("%s#%d/%d %s", s.Key.File, s.Key.Ordinal, i, job.Name),
+			Values:          values,
+			Release:         releaseOptions(ts, job),
+			Capabilities:    capabilities(ts, job),
+			ChartVersion:    cmpOr(job.Chart.Version, ts.Chart.Version),
+			ChartAppVersion: cmpOr(job.Chart.AppVersion, ts.Chart.AppVersion),
+		})
+	}
+	return out, nil
+}
+
+// mergedValues reproduces TestJob.getUserValues: values files first, then the
+// suite-level set, then the job's own set, each merged over what came before.
+// getUserValues also scopes every value under the chart's route
+// (scopeValuesWithRoutes) for subchart-aware rendering; at the top-level route -
+// the only one this tool supports, since subchart-aware scoring is out of scope
+// - that scoping is a no-op, so it is omitted here rather than reproduced.
+func mergedValues(suiteDir string, ts *unittest.TestSuite, job *unittest.TestJob) (map[string]any, error) {
+	base := map[string]any{}
+
+	files := append(slices.Clone(ts.Values), job.Values...)
+	for _, p := range files {
+		path := p
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(suiteDir, path)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("reading values file %s: %w", p, err)
+		}
+		var v map[string]any
+		if err := yaml.Unmarshal(b, &v); err != nil {
+			return nil, fmt.Errorf("parsing values file %s: %w", p, err)
+		}
+		base = v3util.MergeTables(v, base)
+	}
+
+	for _, set := range []map[string]any{ts.Set, job.Set} {
+		for path, val := range set {
+			built, err := valueutils.BuildValueOfSetPath(val, path)
+			if err != nil {
+				return nil, fmt.Errorf("building set path %s: %w", path, err)
+			}
+			base = v3util.MergeTables(built, base)
+		}
+	}
+	return base, nil
+}
+
+// releaseOptions reproduces polishReleaseSettings plus releaseV3Option: the job
+// wins field-by-field, the suite fills in, and Name/Namespace only fall back to
+// Helm's own "RELEASE-NAME"/"NAMESPACE" once both are empty. Revision has no
+// such floor - helm-unittest never defaults it to 1, so a mutation gated on
+// `.Release.Revision` must be judged under 0, not under a first-install value
+// nobody asked for.
+func releaseOptions(ts *unittest.TestSuite, job *unittest.TestJob) v3util.ReleaseOptions {
+	isUpgrade := job.Release.IsUpgrade || ts.Release.IsUpgrade
+	return v3util.ReleaseOptions{
+		Name:      cmpOr(job.Release.Name, ts.Release.Name, "RELEASE-NAME"),
+		Namespace: cmpOr(job.Release.Namespace, ts.Release.Namespace, "NAMESPACE"),
+		Revision:  cmpOr(job.Release.Revision, ts.Release.Revision),
+		IsUpgrade: isUpgrade,
+		// releaseV3Option ties IsInstall directly to IsUpgrade; helm-unittest's
+		// YAML has no independent way to declare an install.
+		IsInstall: !isUpgrade,
+	}
+}
+
+// capabilities reproduces polishCapabilitiesSettings and capabilitiesV3.
+//
+// The Copy() is not optional: helm-unittest itself does `capabilities :=
+// v3util.DefaultCapabilities` and writes through that package-level pointer,
+// which is the race that forced worker subprocesses. We must not repeat it.
+func capabilities(ts *unittest.TestSuite, job *unittest.TestJob) *v3util.Capabilities {
+	job.SetCapabilities() // fills job.Capabilities from its CapabilitiesFields map,
+	// defaulting APIVersions to an empty (non-nil) slice when the job declares no
+	// `capabilities` block at all.
+
+	caps := v3util.DefaultCapabilities.Copy()
+	major := cmpOr(job.Capabilities.MajorVersion, ts.Capabilities.MajorVersion, caps.KubeVersion.Major)
+	minor := cmpOr(job.Capabilities.MinorVersion, ts.Capabilities.MinorVersion, caps.KubeVersion.Minor)
+	caps.KubeVersion = v3util.KubeVersion{
+		Version: fmt.Sprintf("v%s.%s.0", major, minor),
+		Major:   major,
+		Minor:   minor,
+	}
+
+	// Unlike KubeVersion, capabilitiesV3 has no "keep Helm's built-in list"
+	// fallback for APIVersions: it always assigns v3util.VersionSet(job's own
+	// merged set), even when that set is empty - wiping out DefaultCapabilities'
+	// rich API surface unless a test declares its own. A suite's
+	// `capabilities.apiVersions` only reaches the job when the job's own field is
+	// non-nil, which SetCapabilities makes true unless the job's YAML explicitly
+	// sets `apiVersions: null`. Preserving the chart's default set here would
+	// render under a richer API surface than helm-unittest actually tests under.
+	apis := job.Capabilities.APIVersions
+	if len(ts.Capabilities.APIVersions) > 0 && apis != nil {
+		apis = append(slices.Clone(apis), ts.Capabilities.APIVersions...)
+	}
+	caps.APIVersions = v3util.VersionSet(apis)
+	return caps
+}
+
+// cmpOr returns the first non-zero argument.
+func cmpOr[T comparable](vals ...T) T {
+	var zero T
+	for _, v := range vals {
+		if v != zero {
+			return v
+		}
+	}
+	return zero
 }
