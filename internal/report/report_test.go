@@ -395,15 +395,17 @@ func TestJUnitMapsSurvivedToFailure(t *testing.T) {
 		t.Fatalf("invalid XML: %v\n%s", err, b)
 	}
 
-	if suites.Tests != 6 {
-		t.Errorf("tests = %d, want 6", suites.Tests)
+	// 6 mutants + the --max-mutants notice, which sampleRun triggers with Capped: 2.
+	if suites.Tests != 7 {
+		t.Errorf("tests = %d, want 7", suites.Tests)
 	}
 	if suites.Failures != 1 {
 		t.Errorf("failures = %d, want 1 (only the survivor)", suites.Failures)
 	}
 	// NoCoverage, Invalid, Timeout and Error all skip: none grades assertions.
-	if suites.Skipped != 4 {
-		t.Errorf("skipped = %d, want 4", suites.Skipped)
+	// Plus the --max-mutants notice, which also reports as a skip.
+	if suites.Skipped != 5 {
+		t.Errorf("skipped = %d, want 5", suites.Skipped)
 	}
 
 	var sawFailure, sawKilledAsPass bool
@@ -440,6 +442,41 @@ func TestJUnitHasXMLHeader(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(b), `<?xml version="1.0"`) {
 		t.Errorf("missing XML declaration: %.60s", b)
+	}
+}
+
+// TestJUnitNamesTheCap: every other format says what --max-mutants dropped. A
+// CI UI fed only this XML would otherwise read a truncated sample as a complete
+// run, which is the exact misreading the reports are designed to prevent.
+func TestJUnitNamesTheCap(t *testing.T) {
+	run := sampleRun() // Capped: 2, Generated: 9
+	b, err := JUnit(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `name="--max-mutants"`) {
+		t.Errorf("no --max-mutants testsuite in:\n%s", got)
+	}
+	if !strings.Contains(got, "2 of 9 generated mutants were not evaluated") {
+		t.Errorf("cap notice does not state the numbers:\n%s", got)
+	}
+	if !strings.Contains(got, "not full coverage") {
+		t.Errorf("cap notice does not say the run is a sample:\n%s", got)
+	}
+}
+
+// TestJUnitOmitsTheCapNoticeWhenNothingWasDropped keeps a complete run's XML
+// free of a testsuite that would only ever say "nothing was dropped".
+func TestJUnitOmitsTheCapNoticeWhenNothingWasDropped(t *testing.T) {
+	run := sampleRun()
+	run.Capped = 0
+	b, err := JUnit(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "--max-mutants") {
+		t.Errorf("uncapped run should not mention --max-mutants:\n%s", b)
 	}
 }
 

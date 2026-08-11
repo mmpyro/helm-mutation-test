@@ -543,6 +543,20 @@ Skipped reasons are specific, so a skip is never mysterious. These are real, fro
 `Timeout` and `Error` use the same shape (`evaluation timed out: …`, `the tool failed on this
 mutant: …`); the fixture chart produces neither.
 
+A truncated run gains one extra `<testsuite>`, so the cap is visible here as it is in every other
+format:
+
+```xml
+<testsuite name="--max-mutants" tests="1" failures="0" skipped="1" hostname="localhost">
+  <testcase name="truncated run" classname="--max-mutants" time="0.0000">
+    <skipped message="438 of 458 generated mutants were not evaluated (--max-mutants); this run is a sample, not full coverage"/>
+  </testcase>
+</testsuite>
+```
+
+It is prepended to the real testsuites and counted in the top-level `tests` and `skipped`
+attributes, which therefore stay equal to the sum over child suites.
+
 ```yaml
 - name: Publish mutation results
   if: always()

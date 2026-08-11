@@ -65,6 +65,14 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Skipped += ts.Skipped
 		suites.Suites = append(suites.Suites, ts)
 	}
+	// Truncation has to be visible here too. Prepended rather than appended so a
+	// CI UI that lists suites in order shows it before the results it qualifies.
+	if run.Capped > 0 {
+		suites.Suites = append([]junitSuite{cappedNotice(run)}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
+
 	suites.Time = fmt.Sprintf("%.4f", run.Duration.Seconds())
 
 	body, err := xml.MarshalIndent(suites, "", "  ")
@@ -100,6 +108,32 @@ func skipReason(m model.Mutant) string {
 		return "the tool failed on this mutant: " + firstLine(m.Detail)
 	default:
 		return string(m.Status)
+	}
+}
+
+// cappedNotice makes --max-mutants truncation visible in the XML.
+//
+// Every other format names what it excluded. Without this, a capped run's JUnit
+// output is indistinguishable from a complete one, so a CI UI showing only these
+// results would present a sample as full coverage.
+//
+// It is counted in the top-level tests and skipped attributes, so those stay
+// equal to the sum over child testsuites.
+func cappedNotice(run *model.Run) junitSuite {
+	return junitSuite{
+		Name:     "--max-mutants",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      "truncated run",
+			ClassName: "--max-mutants",
+			Time:      "0.0000",
+			Skipped: &junitSkipped{Message: fmt.Sprintf(
+				"%d of %d generated mutants were not evaluated (--max-mutants); "+
+					"this run is a sample, not full coverage",
+				run.Capped, run.Generated)},
+		}},
 	}
 }
 
