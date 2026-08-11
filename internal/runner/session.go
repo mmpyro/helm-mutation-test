@@ -101,6 +101,19 @@ func (s *Session) Run(ctx context.Context) (*model.Run, error) {
 	}
 
 	run.Mutants = mutants
+	if s.Cfg.EquivalenceCheck {
+		s.phase("Checking survivors for equivalence")
+		n := CheckEquivalence(ctx, run.Mutants, EquivalenceInput{
+			ChartDir: s.Cfg.ChartPath,
+			Suites:   baseline.Suites,
+			Files:    byPath,
+			Parallel: s.Cfg.Parallel,
+		})
+		run.EquivalenceChecked = true
+		if n > 0 {
+			s.phase(fmt.Sprintf("%d survivors are equivalent and cannot be killed", n))
+		}
+	}
 	run.ComputeTally()
 	run.Duration = time.Since(start)
 	return run, nil
