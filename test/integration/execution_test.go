@@ -158,8 +158,12 @@ func TestConsoleIsTheDefaultAndWritesNoFiles(t *testing.T) {
 // TestSurvivorsPointAtSomethingActionable: a survivor's value is that a reader can
 // go to the line and add the missing assertion, so location, diff and what-ran all
 // have to be there.
+//
+// Reads the weak run: with equivalence detection on, the strong suite's survivors
+// are all provably equivalent (see TestStrongSuiteHasNoRealSurvivors in
+// internal/runner) and reclassified out of Survived, leaving nothing here to check.
 func TestSurvivorsPointAtSomethingActionable(t *testing.T) {
-	r := strong(t)
+	r := weak(t)
 	j := r.JSON(t)
 	console := r.Console()
 
@@ -183,7 +187,7 @@ func TestSurvivorsPointAtSomethingActionable(t *testing.T) {
 		}
 	}
 	if checked == 0 {
-		t.Fatal("the strong suite produced no survivors to check")
+		t.Fatal("the weak suite produced no survivors to check")
 	}
 	if !strings.Contains(console, "— all passed") {
 		t.Error("console survivors do not say what ran and passed")

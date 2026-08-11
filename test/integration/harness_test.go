@@ -283,12 +283,13 @@ type tally struct {
 	Survived   int `json:"survived"`
 	NoCoverage int `json:"noCoverage"`
 	Invalid    int `json:"invalid"`
+	Equivalent int `json:"equivalent"`
 	Timeout    int `json:"timeout"`
 	Errored    int `json:"error"`
 }
 
 func (t tally) total() int {
-	return t.Killed + t.Survived + t.NoCoverage + t.Invalid + t.Timeout + t.Errored
+	return t.Killed + t.Survived + t.NoCoverage + t.Invalid + t.Equivalent + t.Timeout + t.Errored
 }
 func (t tally) scored() int     { return t.Killed + t.Survived }
 func (t tally) nonScoring() int { return t.total() - t.scored() }

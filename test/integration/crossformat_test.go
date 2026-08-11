@@ -190,6 +190,8 @@ func TestBreakdownsAgreeAcrossFormats(t *testing.T) {
 			x.NoCoverage++
 		case "Invalid":
 			x.Invalid++
+		case "Equivalent":
+			x.Equivalent++
 		case "Timeout":
 			x.Timeout++
 		case "Error":

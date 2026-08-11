@@ -14,7 +14,7 @@ import (
 // tool grew one without the reports being taught about it.
 var knownStatuses = map[string]bool{
 	"Killed": true, "Survived": true, "NoCoverage": true,
-	"Invalid": true, "Timeout": true, "Error": true,
+	"Invalid": true, "Equivalent": true, "Timeout": true, "Error": true,
 }
 
 // TestJSONReportIsCompleteAndSelfConsistent: the JSON report is the canonical
@@ -68,8 +68,13 @@ func TestJSONReportIsCompleteAndSelfConsistent(t *testing.T) {
 
 // TestJSONAttributesEveryKillToAnAssertion: "which test caught this" is the
 // report's most useful field, and a kill with no attribution is a silent gap.
+//
+// Reads the weak run rather than the strong one: with equivalence detection on,
+// the strong suite's only survivors are the provably-equivalent ones (see
+// TestStrongSuiteHasNoRealSurvivors in internal/runner), so it no longer has any
+// real Survived mutants to check the negative case against.
 func TestJSONAttributesEveryKillToAnAssertion(t *testing.T) {
-	j := strong(t).JSON(t)
+	j := weak(t).JSON(t)
 
 	var killed, survived int
 	for _, m := range j.Mutants {
@@ -99,8 +104,12 @@ func TestJSONAttributesEveryKillToAnAssertion(t *testing.T) {
 
 // TestJUnitInvertsTheUsualSense: a survivor is the actionable defect, so it is
 // the survivor -- not the killed mutant -- that must turn a CI job red.
+//
+// Reads the weak run: the strong suite's survivors are now all equivalent (see
+// TestStrongSuiteHasNoRealSurvivors in internal/runner), so it produces zero
+// failing testcases and could never exercise the sawFailure path below.
 func TestJUnitInvertsTheUsualSense(t *testing.T) {
-	r := strong(t)
+	r := weak(t)
 	j, x := r.JSON(t), r.JUnit(t)
 
 	if x.Name != "helm-mutation-test:sample" {
@@ -156,7 +165,8 @@ func TestJUnitInvertsTheUsualSense(t *testing.T) {
 }
 
 // TestJUnitSkipReasonsAreNeverMysterious: a skip that does not say why reads as
-// "the tool gave up". The weak run produces no-coverage and invalid mutants.
+// "the tool gave up". The weak run produces no-coverage, invalid and (now that
+// equivalence detection reclassifies some of its survivors) equivalent mutants.
 func TestJUnitSkipReasonsAreNeverMysterious(t *testing.T) {
 	for _, c := range weak(t).JUnit(t).cases() {
 		if c.Skipped == nil {
@@ -166,6 +176,7 @@ func TestJUnitSkipReasonsAreNeverMysterious(t *testing.T) {
 		switch {
 		case strings.Contains(msg, "no suite renders"),
 			strings.Contains(msg, "stopped the chart rendering"),
+			strings.Contains(msg, "cannot change any rendered manifest"),
 			strings.Contains(msg, "timed out"),
 			strings.Contains(msg, "the tool failed"),
 			strings.Contains(msg, "--max-mutants"):
@@ -291,12 +302,15 @@ func TestStrykerConformsToTheSchema(t *testing.T) {
 		t.Fatal("no files in the stryker report")
 	}
 
-	// Our statuses map onto the schema's vocabulary; Invalid becomes CompileError.
+	// Our statuses map onto the schema's vocabulary; Invalid becomes CompileError
+	// and Equivalent becomes Ignored, the schema's term for a mutant deliberately
+	// excluded from scoring.
 	want := map[string]int{
 		"Killed":       j.Tally.Killed,
 		"Survived":     j.Tally.Survived,
 		"NoCoverage":   j.Tally.NoCoverage,
 		"CompileError": j.Tally.Invalid,
+		"Ignored":      j.Tally.Equivalent,
 		"Timeout":      j.Tally.Timeout,
 		"RuntimeError": j.Tally.Errored,
 	}

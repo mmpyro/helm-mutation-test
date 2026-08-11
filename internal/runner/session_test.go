@@ -7,6 +7,7 @@ import (
 
 	"github.com/mmpyro/helm-mutation-test/internal/config"
 	"github.com/mmpyro/helm-mutation-test/internal/model"
+	"github.com/mmpyro/helm-mutation-test/internal/source"
 )
 
 func sessionCfg(t *testing.T, testFile string) config.Config {
@@ -26,6 +27,33 @@ func runSession(t *testing.T, cfg config.Config) *model.Run {
 		t.Fatalf("session failed: %v", err)
 	}
 	return run
+}
+
+// equivalenceInputForFixture builds an EquivalenceInput for the fixture chart's
+// strong suite, the same shape Session.Run assembles internally: a fresh chart
+// copy, its discovered suites, and every mutable file loaded from disk.
+func equivalenceInputForFixture(t *testing.T) EquivalenceInput {
+	t.Helper()
+	cfg := sessionCfg(t, "tests/strong_test.yaml")
+
+	baseline, err := RunBaseline(cfg.ChartPath, strongOpts())
+	if err != nil {
+		t.Fatalf("RunBaseline: %v", err)
+	}
+	files, _, err := loadMutableFiles(cfg)
+	if err != nil {
+		t.Fatalf("loadMutableFiles: %v", err)
+	}
+	byPath := make(map[string]*source.File, len(files))
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+	return EquivalenceInput{
+		ChartDir: cfg.ChartPath,
+		Suites:   baseline.Suites,
+		Files:    byPath,
+		Parallel: cfg.Parallel,
+	}
 }
 
 // TestWeakSuiteScoresLowAndStrongScoresHigh is the whole tool in one assertion.
@@ -58,6 +86,78 @@ func TestWeakSuiteScoresLowAndStrongScoresHigh(t *testing.T) {
 	}
 	if strong.Score() < 70 {
 		t.Errorf("the strong suite scored %.1f%%, expected at least 70%%", strong.Score())
+	}
+}
+
+// TestNoKilledMutantIsJudgedEquivalent is the safety net for RenderContexts. A
+// killed mutant demonstrably changed something a test observed, so its render
+// MUST differ under some covering context. If the suite-to-job value merge is
+// wrong we render the wrong branch, killed mutants start looking identical, and
+// this test is what catches it.
+func TestNoKilledMutantIsJudgedEquivalent(t *testing.T) {
+	run := runSession(t, sessionCfg(t, "tests/strong_test.yaml"))
+
+	var killed []model.Mutant
+	for _, m := range run.Mutants {
+		if m.Status == model.StatusKilled {
+			killed = append(killed, m)
+		}
+	}
+	if len(killed) == 0 {
+		t.Fatal("no killed mutants to check")
+	}
+	// Pretend they survived, then judge them. None may be called equivalent.
+	for i := range killed {
+		killed[i].Status = model.StatusSurvived
+	}
+	CheckEquivalence(context.Background(), killed, equivalenceInputForFixture(t))
+
+	for _, m := range killed {
+		if m.Status == model.StatusEquivalent {
+			t.Errorf("killed mutant judged equivalent: %s %s:%d (%q -> %q): %s",
+				m.Mutator, m.File, m.Line, m.Original, m.Mutated, m.Detail)
+		}
+	}
+}
+
+// TestStrongSuiteHasNoRealSurvivors: every one of the strong suite's survivors is
+// an equivalent mutant, verified by hand in docs/concepts.md. With detection on,
+// its score is the honest 100% and its actionable output is empty.
+func TestStrongSuiteHasNoRealSurvivors(t *testing.T) {
+	run := runSession(t, sessionCfg(t, "tests/strong_test.yaml"))
+	if run.Tally.Survived != 0 {
+		t.Errorf("strong suite has %d survivors, want 0; first: %+v",
+			run.Tally.Survived, run.Survived()[0])
+	}
+	if run.Tally.Equivalent == 0 {
+		t.Error("strong suite should have equivalent mutants; found none")
+	}
+	// Pinned rather than a loose ">" bound: the whole point of this feature is
+	// that the strong suite's remaining mutants are provably unkillable, so 100%
+	// is the honest number, not merely a high one. If this regresses, either a
+	// real survivor appeared (investigate it) or a mutator/fixture change moved
+	// the goalposts (update docs/concepts.md and this test together).
+	if got := run.Score(); got != 100 {
+		t.Errorf("strong suite score = %.1f, want 100", got)
+	}
+}
+
+// TestEquivalenceVerdictsAreIndependentOfParallelism guards the same invariant as
+// TestParallelismDoesNotChangeResults, extended to the equivalence pass: its own
+// --parallel controls a worker pool over survivors, and a verdict that depended
+// on how many workers judged it would make the report non-reproducible.
+func TestEquivalenceVerdictsAreIndependentOfParallelism(t *testing.T) {
+	oneCfg := sessionCfg(t, "tests/strong_test.yaml")
+	oneCfg.Parallel = 1
+	one := runSession(t, oneCfg)
+
+	manyCfg := sessionCfg(t, "tests/strong_test.yaml")
+	manyCfg.Parallel = 4
+	many := runSession(t, manyCfg)
+
+	if one.Tally.Equivalent != many.Tally.Equivalent {
+		t.Fatalf("equivalent count differs by worker count: %d at -p1, %d at -p4",
+			one.Tally.Equivalent, many.Tally.Equivalent)
 	}
 }
 
