@@ -57,6 +57,12 @@ func inconclusive(reason string) Verdict {
 // It caches the two renders that do not depend on the mutation — the original,
 // and the probe at a given span — so a survivor typically costs a single extra
 // render. Safe for concurrent use.
+//
+// Neither cache is evicted, so `original` holds the full rendered manifest text
+// of every context for the checker's lifetime. That is bounded by the chart's
+// size times its distinct test-job value sets, not by the mutant count, and a
+// Checker lives only for one equivalence pass — but it is the reason not to reuse
+// one across runs or to build one per long-lived process.
 type Checker struct {
 	base  *chart.Chart
 	files map[string]*source.File

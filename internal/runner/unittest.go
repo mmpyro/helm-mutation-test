@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -319,15 +320,20 @@ func (s *Suite) UsesKubernetesProvider() bool {
 // capability settings fill in wherever the job leaves them empty. Every merge
 // below reads the suite's and job's own raw fields directly rather than calling
 // helm-unittest's polish methods, so the answer does not depend on whether
-// RunV3 has already mutated this *Suite.
+// RunV3 has already mutated this *Suite. It is insensitive to that, not
+// oblivious to it: mergedValues and capabilities each say below why re-applying
+// a merge RunV3 may already have applied changes nothing.
 //
 // Reproducing it is the price of rendering under the values the tests actually
 // used, which is what makes an Equivalent verdict safe. It is also the most
 // likely thing here to go wrong, which is why
 // TestNoKilledMutantIsJudgedEquivalent exists.
 func RenderContexts(chartDir string, s *Suite) ([]equivalence.RenderContext, error) {
+	// An error, not an empty list: contributing zero contexts silently would make
+	// every mutant this suite covers inconclusive-but-unreported, and everything
+	// else on this path fails safe.
 	if s == nil || s.suite == nil {
-		return nil, nil
+		return nil, errors.New("suite carries no parsed helm-unittest suite")
 	}
 	ts := s.suite
 	suiteDir := filepath.Dir(filepath.Join(chartDir, filepath.FromSlash(s.Key.File)))
@@ -361,6 +367,15 @@ func RenderContexts(chartDir string, s *Suite) ([]equivalence.RenderContext, err
 // (scopeValuesWithRoutes) for subchart-aware rendering; at the top-level route -
 // the only one this tool supports, since subchart-aware scoring is out of scope
 // - that scoping is a no-op, so it is omitted here rather than reproduced.
+//
+// Prepending the suite's values files is deliberately unconditional even though
+// polishTestJobsPathInfo already did it during the baseline run, so on an
+// already-polished job each suite file is read twice. That is a no-op: the first
+// occurrence of a path is the one that wins (MergeTables keeps what the
+// accumulator already holds), so a duplicate merges a map over itself and the
+// relative precedence of suite and job files is unchanged. The alternative -
+// trusting job.Values to already carry them - would silently drop the suite's
+// values for any *Suite RunV3 has not touched.
 func mergedValues(suiteDir string, ts *unittest.TestSuite, job *unittest.TestJob) (map[string]any, error) {
 	base := map[string]any{}
 
@@ -417,6 +432,14 @@ func releaseOptions(ts *unittest.TestSuite, job *unittest.TestJob) v3util.Releas
 // The Copy() is not optional: helm-unittest itself does `capabilities :=
 // v3util.DefaultCapabilities` and writes through that package-level pointer,
 // which is the race that forced worker subprocesses. We must not repeat it.
+//
+// This is the one place that does write to the shared *unittest.TestJob, and the
+// write is load-bearing rather than incidental. SetCapabilities rebuilds
+// job.Capabilities from CapabilitiesFields, which resets APIVersions to exactly
+// what the job's own YAML declared — so calling it is what stops the suite-level
+// append below from applying a second time to a job RunV3 has already polished.
+// It is idempotent for the same reason: the result depends only on
+// CapabilitiesFields, which nothing here touches.
 func capabilities(ts *unittest.TestSuite, job *unittest.TestJob) *v3util.Capabilities {
 	job.SetCapabilities() // fills job.Capabilities from its CapabilitiesFields map,
 	// defaulting APIVersions to an empty (non-nil) slice when the job declares no

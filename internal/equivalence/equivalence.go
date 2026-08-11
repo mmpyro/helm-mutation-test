@@ -13,6 +13,24 @@
 // This package imports Helm but nothing from internal/runner. The runner adapts
 // helm-unittest's suites into the RenderContexts consumed here, which keeps the
 // helm-unittest dependency confined to internal/runner/unittest.go.
+//
+// # What Render deliberately omits
+//
+// helm-unittest's renderV3Chart calls chartutil.ProcessDependenciesWithMerge
+// before rendering (pkg/unittest/test_job.go); Render does not. That step
+// applies each subchart's condition and tags, dropping the templates of
+// subcharts a value set disables. Skipping it means we render a superset of the
+// templates helm-unittest renders, so we compare a superset of the output and
+// therefore detect a superset of the differences. Extra differences can only
+// make an Equivalent verdict harder to earn, never easier, which is the safe
+// direction for a status that leaves the score's denominator.
+//
+// It must not be "fixed" by calling it. ProcessDependenciesWithMerge rewrites
+// the chart it is given in place — pruning chrt.Dependencies() and merging
+// values into it — and every render here shares one loaded base chart, so the
+// first call would silently change the input to every later render, original and
+// probe alike. Doing it safely would mean deep-copying the chart per context,
+// paying for it on every render, to gain nothing but a smaller comparison set.
 package equivalence
 
 import (
