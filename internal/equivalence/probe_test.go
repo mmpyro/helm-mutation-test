@@ -227,3 +227,54 @@ func TestProbeBytesRefusesABareShortCircuitedOperand(t *testing.T) {
 		t.Fatal("want !ok: a bare operand of a short circuit cannot be probed in isolation")
 	}
 }
+
+// TestProbeParsesRejectsBytesThatDoNotParse pins the general rule behind the
+// declaration fix: the checker treats any difference between original and probe
+// as proof the span executed, so a probe that fails to *parse* proves nothing
+// while looking like proof of everything.
+//
+// After declarations are preserved, no naturally reachable input was found that
+// still produces an unparseable probe, so this exercises the guard directly with
+// deliberately broken bytes rather than through ProbeBytes. It is a safety net
+// for future constructs, and is tested as one.
+func TestProbeParsesRejectsBytesThatDoNotParse(t *testing.T) {
+	f := templateFile("x: {{ .Values.a }}\n")
+
+	if !probeParses(f, []byte("x: {{ fail \"c\" }}\n")) {
+		t.Error("a well-formed probe must be accepted")
+	}
+	if probeParses(f, []byte("{{- range .Values.a }}\nno end\n")) {
+		t.Error("an unterminated action must be rejected")
+	}
+	if probeParses(f, []byte("{{- range $k, $v := .Values.a }}\n{{ $k }}\n{{- end }}\n{{ $k }}\n")) {
+		t.Error("a reference to an out-of-scope variable must be rejected")
+	}
+}
+
+// TestProbeBytesKeepsDeclarationsSoTheProbeParses is the reachable regression for
+// the same bug: every shape that carries a declaration must yield a probe that
+// parses, so it is judged on whether it renders differently rather than on
+// whether it compiles.
+func TestProbeBytesKeepsDeclarationsSoTheProbeParses(t *testing.T) {
+	tests := []struct{ name, src, mutated string }{
+		{"range", "{{- range $k, $v := .Values.labels }}\n{{ $k }}: {{ $v }}\n{{- end }}", ".Values.labels"},
+		{"with", "{{- with $cfg := .Values.config }}\nkey: {{ $cfg.a }}\n{{- end }}", ".Values.config"},
+		{"declaration action", "{{- $n := include \"c.name\" . -}}\nname: {{ $n }}\n", "include"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := templateFile(tc.src)
+			lo := strings.Index(tc.src, tc.mutated)
+			data, ok := ProbeBytes(f, lo, lo+len(tc.mutated))
+			if !ok {
+				t.Fatal("ProbeBytes returned !ok; the declaration shape lost its probe")
+			}
+			if !strings.Contains(string(data), Canary) {
+				t.Fatalf("probe does not contain the canary:\n%s", data)
+			}
+			if _, err := source.ParseTemplate(source.New(data, f.AbsPath, f.Path, f.Kind)); err != nil {
+				t.Fatalf("probe does not parse: %v\n%s", err, data)
+			}
+		})
+	}
+}

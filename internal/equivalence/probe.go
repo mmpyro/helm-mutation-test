@@ -29,9 +29,29 @@ func ProbeBytes(f *source.File, start, end int) ([]byte, bool) {
 		if !ok {
 			return nil, false
 		}
-		return f.Apply(ps, pe, `fail "`+Canary+`"`), true
+		probed := f.Apply(ps, pe, `fail "`+Canary+`"`)
+		if !probeParses(f, probed) {
+			return nil, false
+		}
+		return probed, true
 	}
 	return valuesProbe(f, start, end)
+}
+
+// probeParses reports whether probed bytes still parse as a template.
+//
+// A probe that does not parse fails to render for a reason unrelated to
+// execution, but the checker compares outcomes and treats any difference as proof
+// the span ran — so an unparseable probe is indistinguishable from a real
+// execution signal and would exclude a killable mutant from the score. Refusing
+// leaves the mutant Survived and counted in Run.EquivalenceUnchecked, which is
+// the direction the burden of proof requires.
+//
+// Cost is one parse per span, not per mutant: Checker.probed caches by span key,
+// and a parse is negligible against a chart render.
+func probeParses(f *source.File, probed []byte) bool {
+	_, err := source.ParseTemplate(source.New(probed, f.AbsPath, f.Path, f.Kind))
+	return err == nil
 }
 
 // valuesProbe rewrites a values.yaml span so that any template reading the key
