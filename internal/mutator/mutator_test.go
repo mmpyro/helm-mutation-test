@@ -103,6 +103,8 @@ func TestNoMutatorPanicsOnUnparseableTemplate(t *testing.T) {
 		`{{`,
 		`{{ .Values.a | }}`,
 		"",
+		`{{ range $k, $v := }}`,
+		`{{ range .Values.x }}no end`,
 	}
 	for _, src := range broken {
 		for _, id := range IDs() {
@@ -138,6 +140,12 @@ spec:
   {{- end }}
   token: {{ required "token required" .Values.token | quote }}
   env: {{ if eq .Values.env "prod" }}production{{ else }}dev{{ end }}
+  {{- range .Values.ports }}
+  - {{ . }}
+  {{- end }}
+  {{- range $k, $v := .Values.labels }}
+  {{ $k }}: {{ $v }}
+  {{- end }}
 `
 	f := tmpl(src)
 	for _, id := range IDs() {
@@ -705,6 +713,7 @@ func TestCandidatesAreAlwaysChanges(t *testing.T) {
 	srcs := []string{
 		"apiVersion: apps/v1\nkind: Deployment\nspec:\n  replicas: 3\n  paused: true\n  policy: IfNotPresent\n",
 		`x: {{ .Values.a | default "y" }}` + "\n" + `{{- if eq .Values.e "p" }}z{{ end }}`,
+		"{{- range .Values.ports }}\n- {{ . }}\n{{- end }}\n{{- range $k, $v := .Values.labels }}\n{{ $k }}: {{ $v }}\n{{- end }}\n",
 	}
 	for _, src := range srcs {
 		f := tmpl(src)
