@@ -438,6 +438,78 @@ func cutKeyword(s, keyword string) (rest string, ok bool) {
 	return s[j:], true
 }
 
+// cutDeclarations strips a pipeline's leading variable declarations — "$x := "
+// or "$k, $v := " — reporting whether one was there.
+//
+// Two callers need this. A mutator replacing the whole pipeline of
+// {{ range $k, $v := .Values.m }} leaves $k and $v undeclared, and text/template
+// rejects that at parse time, so the mutant would be Invalid and grade nothing.
+// The equivalence probe doing the same thing is worse: an unparseable probe fails
+// to render for a reason unrelated to execution, and the checker reads any
+// difference between original and probe as proof the span executed — which would
+// exclude a killable mutant from the score.
+//
+// The scan is lexical and stops at the first byte that cannot appear in a
+// declaration, so a ":=" inside a string literal is never mistaken for one.
+func cutDeclarations(s string) (rest string, cut bool) {
+	i := 0
+	for {
+		for i < len(s) && isSpace(s[i]) {
+			i++
+		}
+		if i >= len(s) || s[i] != '$' {
+			return s, false
+		}
+		i++
+		for i < len(s) && isIdentByte(s[i]) {
+			i++
+		}
+		for i < len(s) && isSpace(s[i]) {
+			i++
+		}
+		if i < len(s) && s[i] == ',' {
+			i++
+			continue
+		}
+		break
+	}
+	if i+1 >= len(s) || s[i] != ':' || s[i+1] != '=' {
+		return s, false
+	}
+	i += 2
+	for i < len(s) && isSpace(s[i]) {
+		i++
+	}
+	if i >= len(s) {
+		return s, false // "$x :=" with no expression is not something to cut
+	}
+	return s[i:], true
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// SpanOfRangedExpression returns the span of the expression a range iterates
+// over, excluding any "$k, $v :=" declaration prefix.
+//
+// The start is recovered by suffix length rather than index arithmetic, because
+// cutDeclarations returns a suffix of the slice it was given and there is then no
+// offset to get wrong.
+func SpanOfRangedExpression(f *File, pipe *parse.PipeNode) (start, end int, ok bool) {
+	start, end, ok = SpanOfCondition(f, pipe)
+	if !ok {
+		return 0, 0, false
+	}
+	if rest, cut := cutDeclarations(f.Slice(start, end)); cut {
+		start = end - len(rest)
+	}
+	if start >= end {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
 func isSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }

@@ -545,3 +545,85 @@ func TestMutationPrecedesUndelimitedCall(t *testing.T) {
 		})
 	}
 }
+
+// TestCutDeclarations pins the lexical rule that separates a pipeline's variable
+// declarations from the expression after them. It matters in two places: a mutant
+// that drops `$k, $v :=` leaves the body's variables undeclared and no longer
+// parses, and the equivalence probe doing the same thing fails to parse for a
+// reason unrelated to execution — which the checker reads as proof of execution.
+func TestCutDeclarations(t *testing.T) {
+	tests := []struct {
+		name, in, wantRest string
+		wantCut            bool
+	}{
+		{"single variable", "$x := .Values.a", ".Values.a", true},
+		{"variable pair", "$k, $v := .Values.m", ".Values.m", true},
+		{"generous spacing", "$k ,  $v   :=   .Values.m", ".Values.m", true},
+		{"pipeline after the declaration", "$x := .Values.a | default 3", ".Values.a | default 3", true},
+		{"no declaration at all", ".Values.a", ".Values.a", false},
+		{"the dollar is the expression", "$items", "$items", false},
+		{"root dollar", "$.Values.list", "$.Values.list", false},
+		// A ":=" inside a string literal must never be read as a declaration; the
+		// scan stops at the first byte that cannot appear in one, which is the ".".
+		{"assignment inside a string literal", `.Values.x | replace ":=" "-"`, `.Values.x | replace ":=" "-"`, false},
+		{"declaration with nothing after it", "$x :=", "$x :=", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rest, cut := cutDeclarations(tc.in)
+			if cut != tc.wantCut {
+				t.Fatalf("cut = %v, want %v", cut, tc.wantCut)
+			}
+			if rest != tc.wantRest {
+				t.Fatalf("rest = %q, want %q", rest, tc.wantRest)
+			}
+		})
+	}
+}
+
+// rangePipe returns the pipeline of the first RangeNode in f.
+func rangePipe(t *testing.T, f *File) *parse.PipeNode {
+	t.Helper()
+	tree, err := ParseTemplate(f)
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+	var pipe *parse.PipeNode
+	tree.Walk(func(n parse.Node) bool {
+		if rng, ok := n.(*parse.RangeNode); ok && pipe == nil {
+			pipe = rng.Pipe
+		}
+		return true
+	})
+	if pipe == nil {
+		t.Fatal("no RangeNode in source")
+	}
+	return pipe
+}
+
+// TestSpanOfRangedExpressionExcludesDeclarations: RangeNode's Pipe.Position() is
+// the offset of "$k", not of the expression being ranged over. Treating it as the
+// expression start produces a mutant that does not parse.
+func TestSpanOfRangedExpressionExcludesDeclarations(t *testing.T) {
+	tests := []struct {
+		name, src, want string
+	}{
+		{"no declaration", "{{- range .Values.ports }}\n- {{ . }}\n{{- end }}", ".Values.ports"},
+		{"one declaration", "{{- range $v := .Values.ports }}\n- {{ $v }}\n{{- end }}", ".Values.ports"},
+		{"two declarations", "{{- range $k, $v := .Values.labels }}\n{{ $k }}\n{{- end }}", ".Values.labels"},
+		{"piped expression", "{{- range .Values.x | sortAlpha }}\n- {{ . }}\n{{- end }}", ".Values.x | sortAlpha"},
+		{"root dollar is the expression", "{{- range $.Values.list }}\n- {{ . }}\n{{- end }}", "$.Values.list"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			start, end, ok := SpanOfRangedExpression(f, rangePipe(t, f))
+			if !ok {
+				t.Fatal("SpanOfRangedExpression returned !ok")
+			}
+			if got := f.Slice(start, end); got != tc.want {
+				t.Fatalf("span = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
