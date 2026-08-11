@@ -73,6 +73,12 @@ func writeScore(b *strings.Builder, run *model.Run, c colours) {
 		fmt.Fprintf(b, "  %s\n", c.faint(
 			"equivalence check skipped (--no-equivalence-check): some survivors may be unkillable"))
 	}
+	if run.EquivalenceUnchecked > 0 {
+		// The pass having run is not the same as the pass having concluded.
+		fmt.Fprintf(b, "  %s\n", c.warn(fmt.Sprintf(
+			"%d survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail",
+			run.EquivalenceUnchecked)))
+	}
 	if run.Capped > 0 {
 		// Never let a truncated run read as full coverage.
 		fmt.Fprintf(b, "  %s\n", c.warn(fmt.Sprintf(

@@ -91,9 +91,11 @@ func TestEveryFormatNamesWhatItExcluded(t *testing.T) {
 		}
 	}
 
-	// JUnit turns each into a skip with a specific reason, never a pass.
-	if got := r.JUnit(t).Skipped; got != j.Tally.nonScoring() {
-		t.Errorf("junit skipped = %d, want %d", got, j.Tally.nonScoring())
+	// JUnit turns each into a skip with a specific reason, never a pass, plus one
+	// skipped case per disclosure notice the run carries.
+	want := j.Tally.nonScoring() + j.junitNotices()
+	if got := r.JUnit(t).Skipped; got != want {
+		t.Errorf("junit skipped = %d, want %d", got, want)
 	}
 }
 

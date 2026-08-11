@@ -55,6 +55,12 @@ func Markdown(run *model.Run) ([]byte, error) {
 			"some survivors may be unkillable.\n\n")
 	}
 
+	if run.EquivalenceUnchecked > 0 {
+		// The pass having run is not the same as the pass having concluded.
+		fmt.Fprintf(b, "> ⚠️ %d survivors could not be checked for equivalence and may be unkillable; "+
+			"each one's reason is in its detail.\n\n", run.EquivalenceUnchecked)
+	}
+
 	if run.Capped > 0 {
 		fmt.Fprintf(b, "> ⚠️ `--max-mutants` ran %d of %d generated mutants; %d were not evaluated.\n\n",
 			len(run.Mutants), run.Generated, run.Capped)

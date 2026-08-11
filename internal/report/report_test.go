@@ -957,3 +957,68 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestEveryFormatNamesUncheckedSurvivors: the equivalence pass having run is not
+// the same as the pass having concluded. A chart that will not load, or covering
+// suites that all have to be skipped, leave every survivor unexamined while
+// EquivalenceChecked still says true — and a report that shows only "0
+// equivalent" then reads as a fully verified run. Same rule as --max-mutants and
+// the skipped check: name the gap in every format.
+func TestEveryFormatNamesUncheckedSurvivors(t *testing.T) {
+	formats := map[string]func(*model.Run) (string, error){
+		"console": func(r *model.Run) (string, error) {
+			b := &strings.Builder{}
+			err := Console(b, r, false)
+			return b.String(), err
+		},
+		"markdown": func(r *model.Run) (string, error) {
+			b, err := Markdown(r)
+			return string(b), err
+		},
+		"html": func(r *model.Run) (string, error) {
+			b, err := HTML(r, "testdata/chart")
+			return string(b), err
+		},
+		"junit": func(r *model.Run) (string, error) {
+			b, err := JUnit(r)
+			return string(b), err
+		},
+		"json": func(r *model.Run) (string, error) {
+			b, err := JSON(r)
+			return string(b), err
+		},
+	}
+	for name, render := range formats {
+		t.Run(name, func(t *testing.T) {
+			run := sampleRun()
+			run.EquivalenceUnchecked = 3
+			got, err := render(run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got, "3") {
+				t.Fatalf("%s report does not carry the unchecked count:\n%s", name, got)
+			}
+			// The count alone is not enough — sampleRun contains other 3s. Every
+			// format must also say what it refers to.
+			if name == "json" {
+				if !strings.Contains(got, `"equivalenceUnchecked": 3`) {
+					t.Fatalf("json report lacks equivalenceUnchecked:\n%s", got)
+				}
+				return
+			}
+			if !strings.Contains(got, "could not be checked") && !strings.Contains(got, "could not reach a verdict") {
+				t.Fatalf("%s report does not explain the unchecked survivors:\n%s", name, got)
+			}
+
+			clean := sampleRun() // EquivalenceUnchecked: 0
+			out, err := render(clean)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out, "could not be checked") || strings.Contains(out, "could not reach a verdict") {
+				t.Fatalf("%s report warns about unchecked survivors when there are none:\n%s", name, out)
+			}
+		})
+	}
+}

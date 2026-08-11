@@ -18,35 +18,48 @@ type EquivalenceInput struct {
 	Parallel int
 }
 
+// EquivalenceResult is what one equivalence pass established.
+type EquivalenceResult struct {
+	// Equivalent is how many survivors were promoted to Equivalent.
+	Equivalent int
+	// Unchecked is how many survivors the pass could not reach a verdict on at
+	// all: an unloadable chart, a covering suite it had to skip, a span it could
+	// not probe. Reported separately because "checked, and it is a real
+	// survivor" and "never actually checked" are different claims, and a report
+	// that shows only the former reads as a fully verified run.
+	Unchecked int
+}
+
 // CheckEquivalence re-renders every survivor and promotes the provably
-// unkillable ones to Equivalent, in place. It returns how many it promoted.
+// unkillable ones to Equivalent, in place.
 //
 // It runs in-process rather than in the worker subprocesses: those exist only
 // because helm-unittest writes through Helm's package-level DefaultCapabilities,
 // and our renderer copies that struct instead of aliasing it.
 //
 // Errors are not returned. A failure to prove equivalence is not a failure of
-// the run — the mutant simply stays Survived, with the reason in its Detail.
-func CheckEquivalence(ctx context.Context, mutants []model.Mutant, in EquivalenceInput) int {
+// the run — the mutant simply stays Survived, with the reason in its Detail and
+// a tick on the returned Unchecked count.
+func CheckEquivalence(ctx context.Context, mutants []model.Mutant, in EquivalenceInput) EquivalenceResult {
 	idx := survivorIndexes(mutants)
 	if len(idx) == 0 {
-		return 0
+		return EquivalenceResult{}
 	}
 
 	chart, err := LoadChart(in.ChartDir)
 	if err != nil {
 		markInconclusive(mutants, idx, "inconclusive: "+err.Error())
-		return 0
+		return EquivalenceResult{Unchecked: len(idx)}
 	}
 
 	ctxsBySuiteFile, skipReasons := contextsBySuiteFile(in)
 	checker := equivalence.NewChecker(chart, in.Files)
 
 	var (
-		wg      sync.WaitGroup
-		mu      sync.Mutex
-		queue   = make(chan int)
-		changed int
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		queue  = make(chan int)
+		result EquivalenceResult
 	)
 	workers := min(max(in.Parallel, 1), len(idx))
 	for range workers {
@@ -57,26 +70,35 @@ func CheckEquivalence(ctx context.Context, mutants []model.Mutant, in Equivalenc
 				m := mutants[i]
 				verdict := judgeOne(checker, m, ctxsBySuiteFile, skipReasons)
 				mu.Lock()
-				if verdict.Equivalent {
+				switch {
+				case verdict.Equivalent:
 					mutants[i].Status = model.StatusEquivalent
-					changed++
+					result.Equivalent++
+				case verdict.Inconclusive:
+					result.Unchecked++
 				}
 				mutants[i].Detail = verdict.Detail
 				mu.Unlock()
 			}
 		}()
 	}
+	queued := 0
 	for _, i := range idx {
 		select {
 		case <-ctx.Done():
 		case queue <- i:
+			queued++
 			continue
 		}
 		break
 	}
 	close(queue)
 	wg.Wait()
-	return changed
+	// A cancelled run leaves the tail of the queue unjudged. Those survivors were
+	// not checked either, and saying so is the difference between an aborted run
+	// and a clean one.
+	result.Unchecked += len(idx) - queued
+	return result
 }
 
 // judgeOne assembles the contexts for one mutant's covering suites and judges it.
@@ -89,7 +111,7 @@ func judgeOne(
 	var ctxs []equivalence.RenderContext
 	for _, file := range m.CoveringSuites {
 		if reason, ok := skipReasons[file]; ok {
-			return equivalence.Verdict{Detail: reason}
+			return equivalence.Verdict{Inconclusive: true, Detail: reason}
 		}
 		ctxs = append(ctxs, ctxsBySuiteFile[file]...)
 	}

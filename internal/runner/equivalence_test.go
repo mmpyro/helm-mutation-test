@@ -85,15 +85,18 @@ tests:
 	f := loadDeploymentSource(t, dir)
 	mutants := []model.Mutant{nindentMutant(t, f, suites[0].Key.File)}
 
-	n := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
+	res := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
 		ChartDir: dir,
 		Suites:   suites,
 		Files:    map[string]*source.File{"templates/deployment.yaml": f},
 		Parallel: 1,
 	})
 
-	if n != 1 {
-		t.Fatalf("want 1 promotion, got %d", n)
+	if res.Equivalent != 1 {
+		t.Fatalf("want 1 promotion, got %d", res.Equivalent)
+	}
+	if res.Unchecked != 0 {
+		t.Fatalf("a decided verdict must not count as unchecked, got %d", res.Unchecked)
 	}
 	if mutants[0].Status != model.StatusEquivalent {
 		t.Fatalf("want Equivalent, got %s: %s", mutants[0].Status, mutants[0].Detail)
@@ -139,15 +142,18 @@ tests:
 		CoveringSuites: []string{suites[0].Key.File},
 	}}
 
-	n := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
+	res := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
 		ChartDir: dir,
 		Suites:   suites,
 		Files:    map[string]*source.File{"templates/hpa.yaml": f},
 		Parallel: 1,
 	})
 
-	if n != 0 {
-		t.Fatalf("an unreached mutation must not be promoted, got %d promotions", n)
+	if res.Equivalent != 0 {
+		t.Fatalf("an unreached mutation must not be promoted, got %d promotions", res.Equivalent)
+	}
+	if res.Unchecked != 0 {
+		t.Fatalf("\"not exercised\" is a verdict, not a failure to check; got %d unchecked", res.Unchecked)
 	}
 	if mutants[0].Status != model.StatusSurvived {
 		t.Fatalf("want Survived, got %s", mutants[0].Status)
@@ -195,15 +201,20 @@ tests:
 	}
 	mutants[0].ID, mutants[1].ID = "kube", "badvalues"
 
-	n := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
+	res := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
 		ChartDir: dir,
 		Suites:   append(kubeSuites, badValuesSuites...),
 		Files:    map[string]*source.File{"templates/deployment.yaml": f},
 		Parallel: 1,
 	})
 
-	if n != 0 {
-		t.Fatalf("a skipped suite must never promote a survivor, got %d promotions", n)
+	if res.Equivalent != 0 {
+		t.Fatalf("a skipped suite must never promote a survivor, got %d promotions", res.Equivalent)
+	}
+	// Both survivors went unexamined. A report that showed only "0 equivalent"
+	// would read as a verified run.
+	if res.Unchecked != 2 {
+		t.Errorf("want both survivors counted as unchecked, got %d", res.Unchecked)
 	}
 	for _, m := range mutants {
 		if m.Status != model.StatusSurvived {
@@ -290,5 +301,33 @@ func TestShortCircuitedOperandIsNotJudgedEquivalent(t *testing.T) {
 	// off entirely, which is not the property being protected.
 	if run.Tally.Equivalent == 0 {
 		t.Error("the pass proved nothing equivalent anywhere in this chart, so it was not really exercised")
+	}
+}
+
+// TestCheckEquivalenceCountsEverySurvivorItCouldNotLoad: when the chart itself
+// will not load the pass examines nothing, yet the run still records that the
+// check ran. Without the Unchecked count that is indistinguishable from a clean
+// "checked every survivor, none are equivalent" result.
+func TestCheckEquivalenceCountsEverySurvivorItCouldNotLoad(t *testing.T) {
+	mutants := []model.Mutant{
+		{ID: "a", Status: model.StatusSurvived, File: "templates/deployment.yaml"},
+		{ID: "b", Status: model.StatusSurvived, File: "templates/deployment.yaml"},
+		{ID: "k", Status: model.StatusKilled, File: "templates/deployment.yaml"},
+	}
+	res := CheckEquivalence(context.Background(), mutants, EquivalenceInput{
+		ChartDir: filepath.Join(t.TempDir(), "no-such-chart"),
+		Parallel: 2,
+	})
+
+	if res.Equivalent != 0 {
+		t.Fatalf("an unloadable chart cannot prove anything, got %d promotions", res.Equivalent)
+	}
+	if res.Unchecked != 2 {
+		t.Errorf("want both survivors counted as unchecked, got %d", res.Unchecked)
+	}
+	for _, m := range mutants[:2] {
+		if !strings.Contains(m.Detail, "inconclusive") {
+			t.Errorf("%s: detail should say the check was inconclusive: %q", m.ID, m.Detail)
+		}
 	}
 }

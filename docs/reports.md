@@ -247,6 +247,7 @@ internal model, so refactors do not silently change the published format.
     "error": 0
   },
   "equivalenceChecked": true,
+  "equivalenceUnchecked": 0,
   "generated": 458,
   "capped": 0,
   "mutators": [
@@ -287,6 +288,10 @@ Field notes:
 - `byMutator` and `byFile` are sorted ascending by score.
 - `equivalenceChecked` distinguishes a run where the pass found no equivalent mutants from one where
   `--no-equivalence-check` skipped it entirely — `tally.equivalent == 0` is ambiguous on its own.
+- `equivalenceUnchecked` counts survivors the pass ran over but could not decide: an unloadable
+  chart, a covering suite it had to skip, a span it could not probe. `equivalenceChecked: true` with
+  a non-zero `equivalenceUnchecked` means the check ran and proved nothing about that many
+  survivors; each one's `detail` says why.
 - `skippedFiles` is present only when a file could not be fully analysed.
 - `timing` is in milliseconds; each mutant additionally carries `durationNanos`.
 
@@ -405,8 +410,9 @@ jq -r '.mutants[] | select(.status=="Equivalent") | "\(.file):\(.line)\t\(.detai
 # Confirm nothing was silently dropped
 jq '{generated, capped, evaluated: (.mutants|length)}' mutation-report.json
 
-# Confirm the equivalence pass actually ran, rather than being skipped
-jq '.equivalenceChecked' mutation-report.json
+# Confirm the equivalence pass actually ran, rather than being skipped, and that
+# it reached a verdict on every survivor
+jq '{equivalenceChecked, equivalenceUnchecked}' mutation-report.json
 ```
 
 ---

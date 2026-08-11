@@ -175,6 +175,11 @@ type Run struct {
 	// "equivalent 0" is ambiguous between "checked and found none" and "never
 	// looked", and the second reads as the first.
 	EquivalenceChecked bool `json:"equivalenceChecked"`
+	// EquivalenceUnchecked counts survivors the pass ran over but could not reach
+	// a verdict on. EquivalenceChecked alone overclaims: a chart that fails to
+	// load, or covering suites that all have to be skipped, leave every survivor
+	// unexamined while still reporting "checked, found none equivalent".
+	EquivalenceUnchecked int `json:"equivalenceUnchecked"`
 	// SkippedFiles records files excluded from AST mutation (e.g. parse failures).
 	SkippedFiles []SkippedFile `json:"skippedFiles,omitempty"`
 

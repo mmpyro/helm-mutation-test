@@ -64,3 +64,23 @@ func TestNoEquivalenceCheckSkipsDetectionAndSaysSo(t *testing.T) {
 		t.Errorf("no mutant should be named equivalent with detection skipped:\n%s", console)
 	}
 }
+
+// TestConsoleNamesSurvivorsTheCheckCouldNotDecide: "the pass ran" and "the pass
+// concluded" are different claims. The weak suite leaves survivors whose spans
+// cannot be probed at all, and a report showing only an equivalent count would
+// read as a fully verified run — the same misreading --max-mutants truncation
+// would cause.
+func TestConsoleNamesSurvivorsTheCheckCouldNotDecide(t *testing.T) {
+	r := weak(t)
+	j := r.JSON(t)
+	if !j.EquivalenceChecked {
+		t.Fatal("the default run should have checked equivalence")
+	}
+	if j.EquivalenceUnchecked == 0 {
+		t.Skip("this weak run left no undecidable survivors; nothing to disclose")
+	}
+	if !strings.Contains(r.Console(), "survivors could not be checked for equivalence") {
+		t.Errorf("console does not disclose %d undecided survivors:\n%s",
+			j.EquivalenceUnchecked, r.Console())
+	}
+}

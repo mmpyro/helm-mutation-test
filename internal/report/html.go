@@ -95,6 +95,12 @@ func summaryTable(run *model.Run) string {
 		fmt.Fprint(b, `<tr class="warn"><th>Equivalence</th><td>-</td>`+
 			`<td>check skipped (--no-equivalence-check); some survivors may be unkillable</td></tr>`)
 	}
+	if run.EquivalenceUnchecked > 0 {
+		// The pass having run is not the same as the pass having concluded.
+		fmt.Fprintf(b, `<tr class="warn"><th>Not checked</th><td>%d</td>`+
+			`<td>survivors the equivalence check could not reach a verdict on; `+
+			`each one's reason is in its detail</td></tr>`, run.EquivalenceUnchecked)
+	}
 	if run.Capped > 0 {
 		fmt.Fprintf(b, `<tr class="warn"><th>Not evaluated</th><td>%d</td><td>--max-mutants ran %d of %d generated</td></tr>`,
 			run.Capped, len(run.Mutants), run.Generated)

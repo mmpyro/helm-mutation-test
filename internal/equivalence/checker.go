@@ -37,7 +37,19 @@ func contextsKey(ctxs []RenderContext) string {
 // lands in Mutant.Detail, so it must explain the verdict either way.
 type Verdict struct {
 	Equivalent bool
-	Detail     string
+	// Inconclusive marks a mutation the pass could not decide either way — a
+	// chart that would not load, a span it could not probe. It is reported as a
+	// separate count rather than folded into "not equivalent", because
+	// "checked, and it is a real survivor" and "never actually checked" are
+	// different claims and only the first justifies reading the score as final.
+	Inconclusive bool
+	Detail       string
+}
+
+// inconclusive builds a verdict that decided nothing, prefixing the reason so
+// the detail text reads the same wherever it surfaces.
+func inconclusive(reason string) Verdict {
+	return Verdict{Inconclusive: true, Detail: "inconclusive: " + reason}
 }
 
 // Checker judges mutations against one loaded chart.
@@ -111,16 +123,16 @@ func NewChecker(base *chart.Chart, files map[string]*source.File) *Checker {
 // the span executed under at least one.
 func (c *Checker) Judge(m Mutation, ctxs []RenderContext) Verdict {
 	if len(ctxs) == 0 {
-		return Verdict{Detail: "inconclusive: no usable test-job value sets"}
+		return inconclusive("no usable test-job value sets")
 	}
 	f, ok := c.files[m.File]
 	if !ok {
-		return Verdict{Detail: "inconclusive: no loaded source for " + m.File}
+		return inconclusive("no loaded source for " + m.File)
 	}
 
 	mutated, err := WithMutatedFile(c.base, m.File, f.Apply(m.Start, m.End, m.Replacement))
 	if err != nil {
-		return Verdict{Detail: "inconclusive: " + err.Error()}
+		return inconclusive(err.Error())
 	}
 
 	for _, ctx := range ctxs {
@@ -128,7 +140,7 @@ func (c *Checker) Judge(m Mutation, ctxs []RenderContext) Verdict {
 		after := renderOutcome(mutated, ctx)
 		same, err := sameOutcome(before, after)
 		if err != nil {
-			return Verdict{Detail: "inconclusive: " + err.Error()}
+			return inconclusive(err.Error())
 		}
 		if !same {
 			return Verdict{Detail: fmt.Sprintf("output differs under %s", ctx.Name)}
@@ -137,7 +149,7 @@ func (c *Checker) Judge(m Mutation, ctxs []RenderContext) Verdict {
 
 	executed, err := c.probeExecuted(m, f, ctxs)
 	if err != nil {
-		return Verdict{Detail: "inconclusive: " + err.Error()}
+		return inconclusive(err.Error())
 	}
 	if !executed {
 		return Verdict{Detail: fmt.Sprintf(

@@ -80,6 +80,13 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Tests++
 		suites.Skipped++
 	}
+	// The pass having run is not the same as the pass having concluded, and a CI
+	// UI reading only this file cannot see the per-mutant details.
+	if run.EquivalenceUnchecked > 0 {
+		suites.Suites = append([]junitSuite{equivalenceUncheckedNotice(run)}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
 
 	suites.Time = fmt.Sprintf("%.4f", run.Duration.Seconds())
 
@@ -163,6 +170,28 @@ func equivalenceCheckSkippedNotice() junitSuite {
 			Time:      "0.0000",
 			Skipped: &junitSkipped{Message: "the equivalence check did not run " +
 				"(--no-equivalence-check); some survivors may be unkillable"},
+		}},
+	}
+}
+
+// equivalenceUncheckedNotice reports survivors the equivalence pass ran over but
+// could not decide. Its sibling above covers "the check never ran"; this one
+// covers the subtler case where it ran and proved nothing, which otherwise reads
+// as a fully verified run.
+func equivalenceUncheckedNotice(run *model.Run) junitSuite {
+	return junitSuite{
+		Name:     "equivalence-unchecked",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      "survivors not checked for equivalence",
+			ClassName: "equivalence-unchecked",
+			Time:      "0.0000",
+			Skipped: &junitSkipped{Message: fmt.Sprintf(
+				"%d survivors could not be checked for equivalence and may be unkillable; "+
+					"each one's reason is in its detail",
+				run.EquivalenceUnchecked)},
 		}},
 	}
 }

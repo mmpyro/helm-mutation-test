@@ -12,23 +12,24 @@ import (
 // parse if you want to build something on top.
 func JSON(run *model.Run) ([]byte, error) {
 	b, err := json.MarshalIndent(jsonReport{
-		Schema:             "helm-mutation-test/v1",
-		ChartName:          run.ChartName,
-		ChartPath:          run.ChartPath,
-		Score:              round(run.Score(), 2),
-		Threshold:          run.Threshold,
-		Passed:             run.MeetsThreshold(),
-		Tally:              run.Tally,
-		EquivalenceChecked: run.EquivalenceChecked,
-		Generated:          run.Generated,
-		Capped:             run.Capped,
-		Mutators:           run.Mutators,
-		Suites:             run.Suites,
-		TestCount:          run.TestCount,
-		ByMutator:          breakdowns(run.ByMutator()),
-		ByFile:             breakdowns(run.ByFile()),
-		Mutants:            run.Mutants,
-		Skipped:            run.SkippedFiles,
+		Schema:               "helm-mutation-test/v1",
+		ChartName:            run.ChartName,
+		ChartPath:            run.ChartPath,
+		Score:                round(run.Score(), 2),
+		Threshold:            run.Threshold,
+		Passed:               run.MeetsThreshold(),
+		Tally:                run.Tally,
+		EquivalenceChecked:   run.EquivalenceChecked,
+		EquivalenceUnchecked: run.EquivalenceUnchecked,
+		Generated:            run.Generated,
+		Capped:               run.Capped,
+		Mutators:             run.Mutators,
+		Suites:               run.Suites,
+		TestCount:            run.TestCount,
+		ByMutator:            breakdowns(run.ByMutator()),
+		ByFile:               breakdowns(run.ByFile()),
+		Mutants:              run.Mutants,
+		Skipped:              run.SkippedFiles,
 		Timing: timing{
 			BaselineMillis: run.BaselineDuration.Milliseconds(),
 			TotalMillis:    run.Duration.Milliseconds(),
@@ -53,17 +54,21 @@ type jsonReport struct {
 	// EquivalenceChecked distinguishes "checked, found none" from "never
 	// looked" — without it, an equivalent count of 0 reads as the former
 	// regardless of which is true.
-	EquivalenceChecked bool                `json:"equivalenceChecked"`
-	Generated          int                 `json:"generated"`
-	Capped             int                 `json:"capped"`
-	Mutators           []string            `json:"mutators"`
-	Suites             []model.SuiteInfo   `json:"suites"`
-	TestCount          int                 `json:"testCount"`
-	ByMutator          []breakdown         `json:"byMutator"`
-	ByFile             []breakdown         `json:"byFile"`
-	Mutants            []model.Mutant      `json:"mutants"`
-	Skipped            []model.SkippedFile `json:"skippedFiles,omitempty"`
-	Timing             timing              `json:"timing"`
+	EquivalenceChecked bool `json:"equivalenceChecked"`
+	// EquivalenceUnchecked counts survivors the pass ran over but could not
+	// decide, so a consumer can tell a verified run from one where the check
+	// reached nothing.
+	EquivalenceUnchecked int                 `json:"equivalenceUnchecked"`
+	Generated            int                 `json:"generated"`
+	Capped               int                 `json:"capped"`
+	Mutators             []string            `json:"mutators"`
+	Suites               []model.SuiteInfo   `json:"suites"`
+	TestCount            int                 `json:"testCount"`
+	ByMutator            []breakdown         `json:"byMutator"`
+	ByFile               []breakdown         `json:"byFile"`
+	Mutants              []model.Mutant      `json:"mutants"`
+	Skipped              []model.SkippedFile `json:"skippedFiles,omitempty"`
+	Timing               timing              `json:"timing"`
 }
 
 type breakdown struct {

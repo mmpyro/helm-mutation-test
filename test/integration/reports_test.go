@@ -118,13 +118,16 @@ func TestJUnitInvertsTheUsualSense(t *testing.T) {
 	if x.Failures != j.Tally.Survived {
 		t.Errorf("failures = %d, want %d (the survivors)", x.Failures, j.Tally.Survived)
 	}
-	if x.Skipped != j.Tally.nonScoring() {
-		t.Errorf("skipped = %d, want %d (everything that grades nothing)",
-			x.Skipped, j.Tally.nonScoring())
+	// Non-scoring mutants plus one skipped case per disclosure notice: the weak
+	// run leaves survivors the equivalence pass could not decide, and that has to
+	// be visible here too.
+	if wantSkipped := j.Tally.nonScoring() + j.junitNotices(); x.Skipped != wantSkipped {
+		t.Errorf("skipped = %d, want %d (everything that grades nothing, plus %d notices)",
+			x.Skipped, wantSkipped, j.junitNotices())
 	}
-	if x.Tests != len(j.Mutants) {
-		t.Errorf("tests = %d, want %d (one per mutant, this run is uncapped)",
-			x.Tests, len(j.Mutants))
+	if wantTests := len(j.Mutants) + j.junitNotices(); x.Tests != wantTests {
+		t.Errorf("tests = %d, want %d (one per mutant, this run is uncapped, plus %d notices)",
+			x.Tests, wantTests, j.junitNotices())
 	}
 
 	// The top-level attributes must equal the sum over child suites, or a CI UI
@@ -179,7 +182,8 @@ func TestJUnitSkipReasonsAreNeverMysterious(t *testing.T) {
 			strings.Contains(msg, "cannot change any rendered manifest"),
 			strings.Contains(msg, "timed out"),
 			strings.Contains(msg, "the tool failed"),
-			strings.Contains(msg, "--max-mutants"):
+			strings.Contains(msg, "--max-mutants"),
+			strings.Contains(msg, "could not be checked for equivalence"):
 		default:
 			t.Errorf("skip reason is not one of the documented explanations: %q", msg)
 		}

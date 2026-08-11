@@ -257,22 +257,25 @@ func (r result) HTML(t *testing.T) string     { return string(r.file(t, "mutatio
 // tool should break them.
 
 type jsonReport struct {
-	Schema    string      `json:"schema"`
-	ChartName string      `json:"chartName"`
-	ChartPath string      `json:"chartPath"`
-	Score     float64     `json:"score"`
-	Threshold float64     `json:"threshold"`
-	Passed    bool        `json:"passed"`
-	Tally     tally       `json:"tally"`
-	Generated int         `json:"generated"`
-	Capped    int         `json:"capped"`
-	Mutators  []string    `json:"mutators"`
-	Suites    []suiteInfo `json:"suites"`
-	TestCount int         `json:"testCount"`
-	ByMutator []breakdown `json:"byMutator"`
-	ByFile    []breakdown `json:"byFile"`
-	Mutants   []mutant    `json:"mutants"`
-	Timing    struct {
+	Schema    string  `json:"schema"`
+	ChartName string  `json:"chartName"`
+	ChartPath string  `json:"chartPath"`
+	Score     float64 `json:"score"`
+	Threshold float64 `json:"threshold"`
+	Passed    bool    `json:"passed"`
+	Tally     tally   `json:"tally"`
+	// EquivalenceChecked and EquivalenceUnchecked drive junitNotices below.
+	EquivalenceChecked   bool        `json:"equivalenceChecked"`
+	EquivalenceUnchecked int         `json:"equivalenceUnchecked"`
+	Generated            int         `json:"generated"`
+	Capped               int         `json:"capped"`
+	Mutators             []string    `json:"mutators"`
+	Suites               []suiteInfo `json:"suites"`
+	TestCount            int         `json:"testCount"`
+	ByMutator            []breakdown `json:"byMutator"`
+	ByFile               []breakdown `json:"byFile"`
+	Mutants              []mutant    `json:"mutants"`
+	Timing               struct {
 		BaselineMillis int64 `json:"baselineMillis"`
 		TotalMillis    int64 `json:"totalMillis"`
 	} `json:"timing"`
@@ -366,6 +369,24 @@ type junitCase struct {
 	Skipped *struct {
 		Message string `xml:"message,attr"`
 	} `xml:"skipped"`
+}
+
+// junitNotices is how many disclosure testsuites JUnit prepends for this run:
+// one for each condition the report must not leave implicit. Each contributes
+// one extra skipped testcase, so any expectation derived from the mutant tally
+// has to allow for them.
+func (j jsonReport) junitNotices() int {
+	n := 0
+	if j.Capped > 0 {
+		n++
+	}
+	if !j.EquivalenceChecked {
+		n++
+	}
+	if j.EquivalenceUnchecked > 0 {
+		n++
+	}
+	return n
 }
 
 // cases flattens every testcase across every testsuite.
