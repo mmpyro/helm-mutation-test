@@ -1,0 +1,16 @@
+suite: configmap-weak
+templates:
+  - templates/configmap.yaml
+tests:
+  # Deliberately asserts nothing that any loop produces, so forcing a loop to
+  # zero iterations goes unnoticed. That is the weakness range-empty exposes.
+  - it: renders a ConfigMap with its static key
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - equal:
+          path: metadata.name
+          value: app
+      - equal:
+          path: data.static
+          value: always

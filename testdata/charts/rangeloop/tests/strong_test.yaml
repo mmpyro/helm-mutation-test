@@ -1,0 +1,27 @@
+suite: configmap-strong
+templates:
+  - templates/configmap.yaml
+tests:
+  # Asserts the loop output itself, so a range forced to zero iterations makes
+  # these keys vanish and the assertions fail.
+  - it: renders one key per port
+    asserts:
+      - equal:
+          path: data.port-8080
+          value: open
+      - equal:
+          path: data.port-9090
+          value: open
+  - it: renders one key per label, which requires the $k, $v declarations
+    asserts:
+      - equal:
+          path: data.label-tier
+          value: backend
+      - equal:
+          path: data.label-region
+          value: eu
+  - it: still renders the static key
+    asserts:
+      - equal:
+          path: data.static
+          value: always

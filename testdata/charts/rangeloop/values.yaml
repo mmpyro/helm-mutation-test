@@ -1,0 +1,14 @@
+name: app
+
+ports:
+  - 8080
+  - 9090
+
+labels:
+  tier: backend
+  region: eu
+
+# Empty under every test job, and no job sets it. A loop over an empty list
+# cannot change what renders, so range-empty on it is genuinely Equivalent
+# rather than a survivor blaming the tests.
+extras: []

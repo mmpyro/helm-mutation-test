@@ -8,6 +8,7 @@ import (
 
 	"github.com/mmpyro/helm-mutation-test/internal/config"
 	"github.com/mmpyro/helm-mutation-test/internal/model"
+	"github.com/mmpyro/helm-mutation-test/internal/mutator"
 	"github.com/mmpyro/helm-mutation-test/internal/source"
 )
 
@@ -301,6 +302,84 @@ func TestShortCircuitedOperandIsNotJudgedEquivalent(t *testing.T) {
 	// off entirely, which is not the property being protected.
 	if run.Tally.Equivalent == 0 {
 		t.Error("the pass proved nothing equivalent anywhere in this chart, so it was not really exercised")
+	}
+}
+
+// rangeLoopFixture copies the range chart into a temp dir. It is a chart of its
+// own rather than another template in testdata/charts/sample so that adding it
+// does not move the fixture's scores.
+func rangeLoopFixture(t *testing.T) string {
+	t.Helper()
+	src, err := filepath.Abs("../../testdata/charts/rangeloop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "rangeloop")
+	if err := copyTree(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
+// rangeEmptyByStatus counts range-empty mutants in run by status.
+func rangeEmptyByStatus(run *model.Run) map[model.Status]int {
+	out := map[model.Status]int{}
+	for _, m := range run.Mutants {
+		if m.Mutator == mutator.IDRangeEmpty {
+			out[m.Status]++
+		}
+	}
+	return out
+}
+
+func scoreRangeLoop(t *testing.T, suite string) *model.Run {
+	t.Helper()
+	cfg := config.Defaults()
+	cfg.ChartPath = rangeLoopFixture(t)
+	cfg.TestFiles = []string{suite}
+	cfg.Parallel = 4
+	return runSession(t, cfg)
+}
+
+// TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne is the evidence that
+// range-empty is a useful mutant rather than a guard-worthy one: it must separate
+// a suite that only checks the ConfigMap exists from one that asserts what the
+// loops produced. A mutation neither suite can tell apart would be noise.
+func TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne(t *testing.T) {
+	weak := rangeEmptyByStatus(scoreRangeLoop(t, "tests/weak_test.yaml"))
+	strong := rangeEmptyByStatus(scoreRangeLoop(t, "tests/strong_test.yaml"))
+
+	if weak[model.StatusKilled] != 0 {
+		t.Errorf("the weak suite killed %d range mutants; it asserts nothing any loop produces",
+			weak[model.StatusKilled])
+	}
+	if weak[model.StatusSurvived] < 2 {
+		t.Errorf("the weak suite left %d range survivors, want at least 2 (ports and labels)",
+			weak[model.StatusSurvived])
+	}
+	if strong[model.StatusKilled] < 2 {
+		t.Errorf("the strong suite killed %d range mutants, want at least 2 (ports and labels): %v",
+			strong[model.StatusKilled], strong)
+	}
+	if strong[model.StatusSurvived] != 0 {
+		t.Errorf("the strong suite left %d range survivors, want 0", strong[model.StatusSurvived])
+	}
+}
+
+// TestEmptyRangeIsJudgedEquivalent: extras is empty under every covering context,
+// so forcing its loop to zero iterations cannot change any rendered manifest and
+// no assertion could ever catch it. range evaluates its pipeline even when the
+// result is empty, so the probe legitimately proves execution and the verdict is
+// Equivalent — excluded from the score and named in the report, not hidden.
+//
+// This is also the end-to-end proof that the declaration-carrying probe parses:
+// if it did not, the checker would read the parse failure as proof of execution
+// and reach this verdict for the wrong reason, so the count below would be too
+// high rather than too low.
+func TestEmptyRangeIsJudgedEquivalent(t *testing.T) {
+	got := rangeEmptyByStatus(scoreRangeLoop(t, "tests/strong_test.yaml"))
+	if got[model.StatusEquivalent] != 1 {
+		t.Errorf("range-empty statuses = %v, want exactly 1 equivalent (the extras loop)", got)
 	}
 }
 
