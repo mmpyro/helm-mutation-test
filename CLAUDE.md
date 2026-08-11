@@ -19,7 +19,14 @@ make test-short  # without the race detector
 make lint        # go vet + gofmt check
 make demo        # score the fixture chart with both suites
 make install     # install as a real Helm plugin from this directory
+
+make integration-tests  # black-box CLI tests: exit codes, all five report formats
 ```
+
+`make test` does not include the integration suite: `test/integration` is behind a
+`//go:build integration` tag so the inner loop stays fast. Run it with
+`make integration-tests` (~11s), which builds its own binary from source rather
+than trusting whatever is in `bin/`.
 
 The `runner` package tests take ~3min under `-race` because they spawn worker
 subprocesses and run real chart renders — the fixture chart yields ~460 mutants
@@ -40,6 +47,7 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | `internal/runner` | helm-unittest seam, baseline gate, executor, classification, session |
 | `internal/report` | Five output formats, each a pure function of `model.Run` |
 | `internal/model` | `Run`, `Mutant`, `Status`, `Tally` — the canonical model |
+| `test/integration` | Black-box tests of the built binary: exit codes, flags, every report format |
 
 Two boundaries are load-bearing and should stay intact:
 

@@ -21,23 +21,21 @@ jobs:
       - name: Test
         run: make test
 
-      # The tool measured against its own fixture chart. The weak suite must score
-      # badly and the strong one well; if either drifts, a mutator has regressed.
       - name: Build
         run: make build
 
-      - name: Fixture chart scores as expected
+      # The tool measured against its own fixture chart, end to end through the
+      # real CLI: exit codes, every report format, and the weak/strong score
+      # expectations. If a mutator regresses, this is what catches it.
+      - name: Integration tests
+        run: make integration-tests
+
+      # Not a check: the following steps publish this directory, and the weak and
+      # strong score expectations are asserted by the integration suite above.
+      - name: Generate the report for publishing
         run: |
-          set -eu
           bin/helm-mutation-test -f 'tests/strong_test.yaml' testdata/charts/sample \
             --threshold 70 --report console,markdown,json --report-dir mutation-strong
-          # The weak suite must FAIL a high threshold; that is the point of it.
-          if bin/helm-mutation-test -f 'tests/weak_test.yaml' testdata/charts/sample \
-               --threshold 50 --report console >/dev/null 2>&1; then
-            echo "::error::the deliberately weak suite scored above 50%, so a mutator has regressed"
-            exit 1
-          fi
-          echo "weak suite correctly scored below 50%"
 
       - name: Publish the mutation report to the job summary
         if: always()
