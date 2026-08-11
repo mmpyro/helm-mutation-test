@@ -97,7 +97,7 @@ func TestJSONAttributesEveryKillToAnAssertion(t *testing.T) {
 		}
 	}
 	if killed == 0 || survived == 0 {
-		t.Fatalf("killed = %d, survived = %d; the strong suite should produce both",
+		t.Fatalf("killed = %d, survived = %d; the weak suite should produce both",
 			killed, survived)
 	}
 }

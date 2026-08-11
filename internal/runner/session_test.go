@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/mmpyro/helm-mutation-test/internal/config"
@@ -27,6 +28,36 @@ func runSession(t *testing.T, cfg config.Config) *model.Run {
 		t.Fatalf("session failed: %v", err)
 	}
 	return run
+}
+
+// sharedStrongRun scores the fixture's strong suite once and shares the result.
+// TestNoKilledMutantIsJudgedEquivalent and TestStrongSuiteHasNoRealSurvivors both
+// need a full scored run of the same suite with the same config, and a second
+// full mutant-evaluation pass over the fixture would only duplicate cost, not
+// coverage — it is the single most expensive thing either test does.
+//
+// Safe to share: model.Run holds copied values (strings, ints, slices), not
+// open handles or paths back into the chart copy that produced it, so that
+// copy's later cleanup (fixture(t)'s t.TempDir(), torn down when whichever test
+// ran first finishes) cannot invalidate a result a later test merely reads.
+var (
+	sharedStrongRunOnce sync.Once
+	sharedStrongRunVal  *model.Run
+)
+
+func sharedStrongRun(t *testing.T) *model.Run {
+	t.Helper()
+	sharedStrongRunOnce.Do(func() {
+		sharedStrongRunVal = runSession(t, sessionCfg(t, "tests/strong_test.yaml"))
+	})
+	if sharedStrongRunVal == nil {
+		// runSession's own t.Fatalf already failed whichever test ran first; this
+		// guards the *next* caller against a nil-pointer panic instead of a clean
+		// failure message, since sync.Once still marks itself done even when the
+		// function it ran failed via t.Fatalf.
+		t.Fatal("shared strong-suite run is unavailable: an earlier test failed to produce it")
+	}
+	return sharedStrongRunVal
 }
 
 // equivalenceInputForFixture builds an EquivalenceInput for the fixture chart's
@@ -95,8 +126,14 @@ func TestWeakSuiteScoresLowAndStrongScoresHigh(t *testing.T) {
 // wrong we render the wrong branch, killed mutants start looking identical, and
 // this test is what catches it.
 func TestNoKilledMutantIsJudgedEquivalent(t *testing.T) {
-	run := runSession(t, sessionCfg(t, "tests/strong_test.yaml"))
+	run := sharedStrongRun(t)
 
+	// Ranging over run.Mutants and appending the loop variable copies each
+	// Mutant by value into killed, rather than aliasing run.Mutants itself. That
+	// is what makes the mutation below ("pretend they survived") safe on a run
+	// shared with TestStrongSuiteHasNoRealSurvivors: CheckEquivalence mutates its
+	// []model.Mutant argument in place, and doing so through an alias here would
+	// silently corrupt the other test's cached statuses.
 	var killed []model.Mutant
 	for _, m := range run.Mutants {
 		if m.Status == model.StatusKilled {
@@ -124,10 +161,17 @@ func TestNoKilledMutantIsJudgedEquivalent(t *testing.T) {
 // an equivalent mutant, verified by hand in docs/concepts.md. With detection on,
 // its score is the honest 100% and its actionable output is empty.
 func TestStrongSuiteHasNoRealSurvivors(t *testing.T) {
-	run := runSession(t, sessionCfg(t, "tests/strong_test.yaml"))
+	run := sharedStrongRun(t)
 	if run.Tally.Survived != 0 {
-		t.Errorf("strong suite has %d survivors, want 0; first: %+v",
-			run.Tally.Survived, run.Survived()[0])
+		msg := "strong suite has %d survivors, want 0"
+		if survived := run.Survived(); len(survived) > 0 {
+			t.Errorf(msg+"; first: %+v", run.Tally.Survived, survived[0])
+		} else {
+			// Tally and the mutant list disagreeing is itself a bug, but one this
+			// test should report cleanly rather than panic on.
+			t.Errorf(msg+" (and run.Survived() is empty, so Tally is inconsistent with the mutant list)",
+				run.Tally.Survived)
+		}
 	}
 	if run.Tally.Equivalent == 0 {
 		t.Error("strong suite should have equivalent mutants; found none")
@@ -139,25 +183,6 @@ func TestStrongSuiteHasNoRealSurvivors(t *testing.T) {
 	// the goalposts (update docs/concepts.md and this test together).
 	if got := run.Score(); got != 100 {
 		t.Errorf("strong suite score = %.1f, want 100", got)
-	}
-}
-
-// TestEquivalenceVerdictsAreIndependentOfParallelism guards the same invariant as
-// TestParallelismDoesNotChangeResults, extended to the equivalence pass: its own
-// --parallel controls a worker pool over survivors, and a verdict that depended
-// on how many workers judged it would make the report non-reproducible.
-func TestEquivalenceVerdictsAreIndependentOfParallelism(t *testing.T) {
-	oneCfg := sessionCfg(t, "tests/strong_test.yaml")
-	oneCfg.Parallel = 1
-	one := runSession(t, oneCfg)
-
-	manyCfg := sessionCfg(t, "tests/strong_test.yaml")
-	manyCfg.Parallel = 4
-	many := runSession(t, manyCfg)
-
-	if one.Tally.Equivalent != many.Tally.Equivalent {
-		t.Fatalf("equivalent count differs by worker count: %d at -p1, %d at -p4",
-			one.Tally.Equivalent, many.Tally.Equivalent)
 	}
 }
 
@@ -267,6 +292,14 @@ func TestRunIsDeterministic(t *testing.T) {
 // TestParallelismDoesNotChangeResults is the guard on the in-process concurrency
 // decision. helm-unittest has no mutable package state and no os.Chdir, so
 // per-worker chart copies should make parallel runs identical to serial ones.
+//
+// This also covers the equivalence pass without a dedicated test: sessionCfg
+// builds from config.Defaults(), which enables EquivalenceCheck, so the
+// per-mutant Status comparison below already includes any Equivalent verdicts.
+// Equal per-mutant status at -p1 vs -p8 implies equal equivalent counts too, so
+// a separate "equivalence verdicts are parallelism-independent" test could never
+// fail in a scenario where this one passes — it would only re-pay for a second
+// full mutant-evaluation pass over the fixture to pin a corollary.
 func TestParallelismDoesNotChangeResults(t *testing.T) {
 	serialCfg := sessionCfg(t, "tests/strong_test.yaml")
 	serialCfg.Parallel = 1
