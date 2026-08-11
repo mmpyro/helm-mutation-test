@@ -11,7 +11,7 @@ A change that survives is a **survived mutant** — a precise pointer at a missi
 
 | page | what is in it |
 |---|---|
-| [concepts.md](concepts.md) | The mutation score, the six statuses, why `Invalid` and `NoCoverage` are excluded, the baseline gate, coverage-aware suite selection, and why workers are subprocesses |
+| [concepts.md](concepts.md) | The mutation score, the seven statuses, why `Invalid`, `NoCoverage` and `Equivalent` are excluded, the baseline gate, coverage-aware suite selection, and why workers are subprocesses |
 | [cli-reference.md](cli-reference.md) | Every flag, grouped, with defaults, validation rules and exit codes |
 | [mutators.md](mutators.md) | All eight mutators, with a real before/after and the weak assertion each one exposes |
 | [reports.md](reports.md) | All five report formats, with real sample output and when to use each |
@@ -28,24 +28,25 @@ $ helm unittest -f 'tests/strong_test.yaml' testdata/charts/sample   # PASS, 43 
 
 Mutation testing separates them completely. The same 458 mutants, run against each suite:
 
-| suite | score | killed | survived | no coverage | invalid |
-|---|---:|---:|---:|---:|---:|
-| `tests/weak_test.yaml` | **2.1%** | 6 | 275 | 163 | 14 |
-| `tests/strong_test.yaml` | **95.2%** | 417 | 21 | 0 | 20 |
+| suite | score | killed | survived | equivalent | no coverage | invalid |
+|---|---:|---:|---:|---:|---:|---:|
+| `tests/weak_test.yaml` | **2.3%** | 6 | 255 | 20 | 163 | 14 |
+| `tests/strong_test.yaml` | **100.0%** | 417 | 0 | 21 | 0 | 20 |
 
 The weak suite has four tests, asserting only `isKind` and `exists`. It is green, and it will stay
 green while the chart loses `imagePullPolicy`, changes `containerPort`, inverts every feature toggle,
-or drops its `required` guards. The 2.1% is that fact made into a number.
+or drops its `required` guards. The 2.3% is that fact made into a number.
 
-The strong suite's 95.2% is, in effect, a perfect score. All 21 of its survivors are
-[equivalent mutants](concepts.md#equivalent-mutants) — mutations that change the chart's source but
-cannot change its rendered meaning, so no assertion could ever catch them. 14 are `nindent`
-indentation widths and 7 are `values.yaml` keys already holding their type's zero value. Counting only
-mutants that *can* be killed, the strong suite killed 417 of 417.
+The strong suite's 100.0% is a perfect score, honestly measured: its 21 remaining mutants are
+[equivalent](concepts.md#equivalent-mutants) — mutations that change the chart's source but cannot
+change its rendered meaning, so no assertion could ever catch them. 14 are `nindent` indentation
+widths and 7 are `values.yaml` keys already holding their type's zero value.
 
-The tool does not detect equivalent mutants; it reports them as `Survived` and they sit in the score's
-denominator. Before chasing a survivor, check whether it is real — the one-line recipe is in
-[concepts.md](concepts.md#how-to-recognise-one).
+The tool detects equivalent mutants automatically, on by default (`--no-equivalence-check` turns it
+off): it re-renders every survivor with and without the mutation and reclassifies the provably
+unkillable ones to `Equivalent`, out of the score's denominator. See
+[concepts.md](concepts.md#equivalent-mutants) for how, and its
+[by-hand recipe](concepts.md#how-to-recognise-one-by-hand) for verifying a verdict yourself.
 
 Reproduce both with `make demo`.
 
@@ -81,20 +82,20 @@ exit code 2 — a score measured against a red suite is a fiction. See
 ```
 Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
-  Score    2.1%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 275 survived)
-  not scored: 163 no-coverage · 14 invalid
+  Score    2.3%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 255 survived)
+  not scored: 163 no-coverage · 20 equivalent · 14 invalid
 
   By mutator                          killed  survived    score
     bool-flip                              0        14    0.0%
     comparison-swap                        0         3    0.0%
     cond-negate                            0        10    0.0%
     default-drop                           0         4    0.0%
-    num-literal                            0        55    0.0%
-    required-drop                          0         2    0.0%
-    yaml-key-delete                        4       135    2.9%
-    str-literal                            2        52    3.7%
+    num-literal                            0        47    0.0%
+    required-drop                          0         0       —  not scored
+    yaml-key-delete                        4       131    3.0%
+    str-literal                            2        46    4.2%
 
-  SURVIVED (275)
+  SURVIVED (255)
 
   templates/deployment.yaml:34  yaml-key-delete
     -           imagePullPolicy: {{ .Values.image.pullPolicy }}

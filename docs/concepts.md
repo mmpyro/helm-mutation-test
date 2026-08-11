@@ -1,9 +1,9 @@
 # Concepts
 
-How the score is defined, what the six statuses mean, and the design decisions behind them.
+How the score is defined, what the seven statuses mean, and the design decisions behind them.
 
 - [The mutation score](#the-mutation-score)
-- [The six statuses](#the-six-statuses)
+- [The seven statuses](#the-seven-statuses)
 - [Why Invalid and NoCoverage are excluded](#why-invalid-and-nocoverage-are-excluded)
 - [Equivalent mutants](#equivalent-mutants)
 - [Status precedence](#status-precedence)
@@ -36,7 +36,7 @@ would flatter the number.
 The score is banded for colour and for the HTML/Stryker `thresholds` field: **≥ 80%** good,
 **≥ 50%** middling, below that poor.
 
-## The six statuses
+## The seven statuses
 
 | status | meaning | in the score? |
 |---|---|---|
@@ -44,6 +44,7 @@ The score is banded for colour and for the HTML/Stryker `thresholds` field: **�
 | `Survived` | Every covering test still passed. A missing assertion. | **yes** |
 | `NoCoverage` | No test suite exercises the mutated file at all, so the mutation was never run. | no |
 | `Invalid` | The mutation stopped the chart rendering. | no |
+| `Equivalent` | The mutation provably cannot change any rendered manifest — see [below](#equivalent-mutants). | no |
 | `Timeout` | Evaluation exceeded the per-mutant timeout. | no |
 | `Error` | The tool itself failed on this mutant (chart copy, load, suite setup). | no |
 
@@ -101,7 +102,7 @@ templates, so **163 of its 458 mutants — 36% — never run at all**:
 
 Those five lines are a different and more serious finding than a low score: five entire templates are
 untested. Fix them by adding suites, not by adding assertions to the suites you have. Note the two
-gaps compound — the weak suite scores 2.1% on the 281 mutants it *did* run, on top of never running
+gaps compound — the weak suite scores 2.3% on the 295 mutants it *did* run, on top of never running
 the other 163.
 
 The strong suite has zero no-coverage mutants over the same chart, because it declares all seven
@@ -120,14 +121,69 @@ This is the same underlying idea as `Invalid` — a mutant that grades nothing �
 opposite direction. An `Invalid` mutant is caught by every test; an equivalent mutant can be caught by
 none. Both tell you nothing about your assertions.
 
-**The tool does not detect or exclude them.** Equivalent mutants are reported as `Survived` and counted
-in the score's denominator, which drags the score down by an amount nobody can fix. Recognising them
-is left to the reader. There is no `--skip-equivalent` flag: `config.SkipEquivalent` exists as a struct
-field but is wired to nothing.
+**The tool detects them automatically**, on by default. After the workers finish, every remaining
+`Survived` mutant is re-rendered in-process (no chart copy, no subprocess — `internal/equivalence`
+uses `helm.sh/helm/v3/pkg/engine` directly) and reclassified to `Equivalent` when the evidence proves
+it. `--no-equivalence-check` turns the pass off, for when its extra render time is not worth paying.
 
-### How to recognise one
+### The parsed-render comparison
 
-Render the chart before and after the mutation and compare the **parsed** documents, not the text:
+For each survivor, the tool renders the chart with and without the mutation under every **context**
+from the mutant's covering suite files — one context per non-skipped test job in those files,
+reconstructed from that job's merged `Values`, `Set`, release, chart and capabilities settings (the
+same merge helm-unittest performs internally). Coverage is tracked per suite *file*
+(`Mutant.CoveringSuites`), so where a file holds several `suite:` documents and only one of them
+renders the mutated template, every job in that file is still used as a context — checking more value
+sets than strictly necessary, never fewer, which only makes an `Equivalent` verdict harder to earn, not
+easier.
+
+Under each context, the two renders are compared byte-for-byte first, and only parsed on a byte
+difference — parsed equality is what matters, since `nindent 4 → 5` changes every byte and no data. For
+a structured YAML manifest that comparison is the recipe below, automated: helm-unittest computes every
+assertion over a YAML manifest from the parsed document, so parsed-equal renders are indistinguishable
+to any such assertion. `.txt` templates (`NOTES.txt` and the like) are the one exception — helm-unittest
+stores their output verbatim and three validators (`equal_raw_validator.go`,
+`match_regex_raw_validator.go`, `snapshot_raw_validator.go`) assert on that raw string directly — so
+`.txt` renders are compared as exact text, not parsed.
+
+A render error counts as an outcome, not a shortcut to "inconclusive": a suite job that supplies no
+value for a `required` field and asserts the failure message is a real, common pattern, and the fixture
+chart has one. If the mutant and the original both fail to render with the *same* message under a
+context, that agreement is evidence the mutation is invisible there. Only when the tool's own attempt
+to render either side cannot be carried out at all — the chart cannot be loaded, the mutated file
+cannot be re-parsed, no probe can be built for the span — does that context become genuinely
+inconclusive.
+
+### The execution probe, and why an unexercised span stays `Survived`
+
+Identical renders happen for two very different reasons: the mutation genuinely cannot change output,
+or no covering test's values happen to reach the mutated line. The second is a real missing assertion —
+excluding it would be exactly the score flattery this project forbids — so a mutant is judged
+`Equivalent` only after an **execution probe** proves the span ran.
+
+The probe is a maximal, mutation-independent perturbation at the same span: a template span becomes
+`{{ fail "canary" }}` (or the `if`/`with`/`range` equivalent, preserving trim markers), which errors
+the instant it evaluates; a `values.yaml` span becomes a non-empty sentinel string, which is truthy
+even where the original was `false`, `0` or `""`. Proof of execution is that the probe's outcome
+differs from the original's outcome in some context — covering both a probe-induced render error and a
+probe-induced output change, and still correct when the original already errors, since a probe that
+reproduces that same pre-existing error proves nothing.
+
+A mutant whose render is identical everywhere but whose probe never differs from the original stays
+`Survived`, with the detail `not exercised by any covering test`: nobody has written a test that reaches
+that line yet, so it remains a real, actionable finding rather than being quietly dropped.
+
+Two things fall outside the check's scope on purpose. A suite that installs a fake Kubernetes provider
+(`kubernetesProvider:`) makes `lookup` return objects the tool's own renderer will never see, so its
+mutants skip detection entirely and stay `Survived`. And a chart's post-renderer is ignored — that can
+only ever collapse two different inputs into one output, never split two identical ones, so ignoring it
+can only make the tool report *not* equivalent, never the reverse.
+
+### How to recognise one by hand
+
+This is what the automated check above does for you, but it is still how to verify a verdict by hand,
+or to check a survivor when the check is disabled. Render the chart before and after the mutation and
+compare the **parsed** documents, not the text:
 
 ```console
 $ helm template t ./chart               > a.yaml     # original
@@ -149,9 +205,9 @@ renders anything — that is a vacuous pass, not equivalence.
 
 ### The two patterns that show up in Helm charts
 
-Both are visible in the fixture chart, whose strong suite leaves 21 survivors — and **all 21 are
-equivalent**, verified by the comparison above under both default values and with every feature toggle
-enabled:
+Both are visible in the fixture chart, whose strong suite's equivalence pass finds 21 equivalent
+mutants — every survivor the killed/survived split alone would have left behind — confirmed by the
+by-hand comparison above under both default values and with every feature toggle enabled:
 
 **1. An `indent` / `nindent` width incremented by one.** YAML does not care about a block mapping's
 absolute indentation, only that it is deeper than its parent. So `nindent 4 → 5` emits different bytes
@@ -162,7 +218,7 @@ measured across those same 14 sites:
 
 | variant | render comparison | tool status |
 |---|---|---|
-| `nindent N → N+1` | `parsed-equal: True` (14/14) | `Survived` — equivalent, unkillable |
+| `nindent N → N+1` | `parsed-equal: True` (14/14) | `Equivalent` — unkillable |
 | `nindent N → 0` | parsed data differs (9/14) | `Killed` |
 | `nindent N → 0` | manifest no longer parses (5/14) | `Invalid` |
 
@@ -191,12 +247,14 @@ set, not just the default one.
 
 ### What this means for a score
 
-The fixture chart's strong suite scores **95.2%** — 417 killed, 21 survived. Since all 21 survivors are
-unkillable, it killed **417 of 417 killable mutants**. The missing 4.8% is not a gap; it is the floor
-this chart imposes on any suite.
+The fixture chart's strong suite scores **100.0%** — 417 killed, 0 survived, 21 equivalent. Every
+mutant the suite could possibly kill, it killed; the 21 that remain are excluded from the denominator
+rather than depressing the score by an amount no suite could ever recover.
 
-So a high score with a handful of survivors deserves a check before it deserves work. Chase a survivor
-only after the parsed-render comparison says it is real.
+So a survivor that remains after the equivalence check has already had this reasoning applied to it —
+it is not a candidate to re-check by hand, it is the tool's best evidence of a real missing assertion.
+Reach for the by-hand recipe only when the check was disabled (`--no-equivalence-check`), or to satisfy
+yourself the automated verdict is right.
 
 ## Status precedence
 
@@ -209,6 +267,12 @@ load-bearing and pinned by `TestClassify`:
 3. **Otherwise, any suite-level setup error → `Error`.** That is our failure, not the chart's.
 4. **Otherwise, zero tests actually ran → `NoCoverage`.**
 5. **Otherwise → `Survived`.**
+
+`Equivalent` is not one of `Classify`'s outcomes and is not part of this ordering. It is decided
+afterwards, in a separate post-pass over the run, and it can only ever move a mutant that `Classify`
+already placed at `Survived` — never a `Killed`, `Invalid`, `Error` or `NoCoverage` mutant. That keeps
+the two concerns apart: `Classify` answers "what happened when the suites ran," and the equivalence
+pass separately asks "could any suite have caught this at all."
 
 ## The baseline gate is a hard stop
 
@@ -299,15 +363,16 @@ this tool exists to prevent.
 $ ./bin/helm-mutation-test testdata/charts/sample -f 'tests/strong_test.yaml' \
     --no-color --max-mutants 20
 
-Mutation testing sample  (7 suites, 43 tests, baseline 41ms)
+Mutation testing sample  (7 suites, 43 tests, baseline 40ms)
 
-  Score   94.7%  █████████████████████████░   (18 killed / 1 survived)
-  not scored: 1 invalid
+  Score  100.0%  ██████████████████████████   (18 killed / 0 survived)
+  not scored: 1 equivalent · 1 invalid
   only 20 of 458 generated mutants were run (--max-mutants); 438 not evaluated
 ```
 
-Note that 94.7% is *not* comparable to the full run's 95.2%. It is a sample of 20 out of 458 — under
-5% of the population — and the warning line is there so nobody quotes it as the score.
+This particular sample happens to score the same 100.0% as the full run, but that is not something to
+rely on — it is a sample of 20 out of 458, under 5% of the population, and the warning line is there so
+nobody quotes it as the score regardless of whether the numbers happen to line up.
 
 The same applies to the markdown format's survivor list, which caps at 40 entries and then says
 `_N further survivors omitted; see the JSON or HTML report._`

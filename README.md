@@ -33,10 +33,17 @@ $ helm unittest -f 'tests/strong_test.yaml' testdata/charts/sample   # PASS, 14 
 
 Mutation testing separates them:
 
-| suite | score | killed | survived | invalid |
-|---|---:|---:|---:|---:|
-| `weak_test.yaml` | **6.6%** | 7 | 99 | 4 |
-| `strong_test.yaml` | **74.4%** | 96 | 33 | 5 |
+| suite | killed | survived | equivalent | no-coverage | invalid | score |
+|---|---:|---:|---:|---:|---:|---:|
+| `weak_test.yaml` | 6 | 255 | 20 | 163 | 14 | **2.3%** |
+| `strong_test.yaml` | 417 | 0 | 21 | 0 | 20 | **100.0%** |
+
+Neither suite's score is measured against a denominator that includes something it never had a chance
+to catch. `no-coverage` counts mutants in the five templates the weak suite never renders at all, and
+`equivalent` counts mutants that changed the chart's source but provably cannot change any rendered
+manifest, so no assertion anywhere could have caught them either. Both are excluded from the score and
+named explicitly — see [equivalent mutants](docs/concepts.md#equivalent-mutants) and
+[why Invalid and NoCoverage are excluded](docs/concepts.md#why-invalid-and-nocoverage-are-excluded).
 
 Run `make demo` to reproduce both.
 
@@ -73,21 +80,21 @@ helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 5
 ### Reading the output
 
 ```
-Mutation testing sample  (1 suite, 4 tests, baseline 1ms)
+Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
-  Score    6.6%  ██░░░░░░░░░░░░░░░░░░░░░░░░   (7 killed / 99 survived)
-  not scored: 24 no-coverage · 4 invalid
+  Score    2.3%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 255 survived)
+  not scored: 163 no-coverage · 20 equivalent · 14 invalid
 
   By mutator                          killed  survived    score
-    cond-negate                            0         3    0.0%
-    num-literal                            0        12    0.0%
+    bool-flip                              0        14    0.0%
+    num-literal                            0        47    0.0%
     ...
 
-  SURVIVED (99)
+  SURVIVED (255)
 
-  templates/deployment.yaml:8  num-literal
+  templates/deployment.yaml:9  yaml-key-delete
     -   replicas: {{ .Values.replicaCount }}
-    +   replicas: 3
+    + (line removed)
     ran 4 tests in tests/weak_test.yaml — all passed
 ```
 
@@ -133,11 +140,13 @@ folding it in would flatter the number:
 |---|---|
 | **No coverage** | No suite renders the mutated template, so no test ever had the chance to catch it. This is a finding in its own right. |
 | **Invalid** | The mutation stopped the chart rendering, so *every* test "caught" it regardless of what it asserts. That grades nothing. A high invalid rate is a bug in this tool, not in your suite. |
+| **Equivalent** | The mutation provably cannot change any rendered manifest — checked automatically on every survivor, on by default. No assertion could ever have caught it either, so it is excluded the same way. |
 | **Timeout** | Evaluation exceeded the per-mutant timeout. |
 | **Error** | The tool itself failed on that mutant. |
 
 `--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
-coverage.
+coverage. `--no-equivalence-check` disables the equivalence pass; every format states when that
+happened, the same way it states a truncation.
 
 ## Reports
 

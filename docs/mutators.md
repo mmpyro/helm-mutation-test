@@ -24,15 +24,19 @@ once against its deliberately weak 4-test suite and once against its thorough 43
 | [`str-literal`](#str-literal) | string literals | 83 | 0 | 2/52 | 83/0 |
 | [`yaml-key-delete`](#yaml-key-delete) | a key and its nested block | 231 | 15 | 4/135 | 209/7 |
 
-`k/s` is killed/survived. The weak suite's zeros are the headline: **six of the eight mutators score
-0.0% against it**, because a suite of `isKind` and `exists` assertions cannot notice *anything* about
-content. Its weak-column totals are smaller than the mutant totals because it declares only two of
-the chart's seven templates, so the rest are `NoCoverage`.
+`k/s` is killed/survived, counting a mutant as "survived" whenever every covering test still passed —
+the raw outcome before the tool's automatic equivalence check runs. The weak suite's zeros are the
+headline: **six of the eight mutators score 0.0% against it**, because a suite of `isKind` and `exists`
+assertions cannot notice *anything* about content. Its weak-column totals are smaller than the mutant
+totals because it declares only two of the chart's seven templates, so the rest are `NoCoverage`.
 
-Only two mutators leave any survivor against the strong suite, and **every one of those 21 survivors is
-an [equivalent mutant](concepts.md#equivalent-mutants)** — unkillable by construction, in the two
-patterns noted under [`num-literal`](#num-literal) and [`yaml-key-delete`](#yaml-key-delete). Against
-mutants that *can* be killed, the strong suite scores 100%.
+Only two mutators leave any such case against the strong suite, and **every one of those 21 is an
+[equivalent mutant](concepts.md#equivalent-mutants)** — unkillable by construction, in the two patterns
+noted under [`num-literal`](#num-literal) and [`yaml-key-delete`](#yaml-key-delete). The tool detects
+this automatically and reports them as `Equivalent`, not `Survived`: a real run of `helm-mutation-test`
+against the strong suite shows `0 survived` for both mutators, with the 14 and 7 above counted under
+`Equivalent` instead. Against mutants that *can* be killed, the strong suite scores 100% — a real
+number now, not an aspiration, since nothing is left in the denominator that no suite could ever kill.
 
 Which assertion types actually did the killing in the strong run, measured from its JSON report:
 
@@ -354,9 +358,10 @@ So the increment variant on an `indent`/`nindent` argument is not a useful mutan
 variant at the same site is. Verified by rendering both and comparing parsed documents: the tool's
 status matched that independent comparison at all 14 sites.
 
-`num-literal` is one of only two mutators with any survivors in the strong run, and every one of its
-14 survivors is that unkillable increment. Where the `→ 0` mutation does break rendering, the `Invalid`
-classification handles it honestly instead of silently.
+`num-literal` is one of only two mutators that leave anything unkilled in the strong run, and every one
+of those 14 is that unkillable increment — reported as `Equivalent`, not `Survived`, by the tool's
+automatic check. Where the `→ 0` mutation does break rendering, the `Invalid` classification handles it
+honestly instead of silently.
 
 **Why it matters.** The increment variant catches off-by-one blindness; the zero variant catches
 fields nobody asserts at all.
@@ -552,8 +557,9 @@ passing, that field is completely unasserted. There is no more direct statement 
 Everything with content in it survives — `replicas`, `imagePullPolicy`, `containerPort`, both probes,
 `resources`, the whole `env:` block, every label.
 
-**The 7 survivors in the strong run are all `values.yaml` keys**, and every one is a case where
-deleting the key changes nothing that renders:
+**The 7 mutants left unkilled in the strong run are all `values.yaml` keys**, reported as `Equivalent`
+by the tool rather than `Survived`, and every one is a case where deleting the key changes nothing
+that renders:
 
 | survivor | why deleting it renders identically |
 |---|---|
@@ -572,7 +578,8 @@ value nil, and Go templates treat nil and the zero value identically both for tr
 
 These seven are not merely parsed-equal — they render **byte-identical** manifests, verified under both
 the chart's default values and with every feature toggle enabled. No assertion can catch them, so the
-missing 3.2% of this mutator's score is a floor rather than a gap.
+tool's equivalence check reclassifies all seven, and `yaml-key-delete` scores a genuine 100% against
+the strong suite rather than the 96.8% a naive killed/survived count would otherwise show.
 
 The equivalence also survives value overrides: a suite that sets the key supplies its own value whether
 or not `values.yaml` declares it, so the deletion is invisible under every value set.

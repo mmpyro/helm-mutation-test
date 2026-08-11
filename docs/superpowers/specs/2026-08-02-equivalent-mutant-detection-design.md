@@ -36,13 +36,22 @@ the evidence is not conclusive.
 
 `snapshot.Cache.Compare` computes its snapshot as
 `common.TrustedMarshalYAML(content)`, where `content` is the **parsed** manifest, not
-the rendered text. Every other helm-unittest assertion type also reads values out of
-the parsed document tree. No assertion anywhere in helm-unittest observes raw
-template output.
+the rendered text. Every other helm-unittest assertion type over a YAML manifest also
+reads values out of the parsed document tree.
 
-Therefore: **if the original and the mutant parse to identical documents, no
-assertion in any suite can distinguish them.** That is a proof, not a heuristic, and
-it is what licenses removing the mutant from the denominator.
+That does not extend to `.txt` templates such as `NOTES.txt`. `TestJob.parseTextFile`
+(`pkg/unittest/test_job.go`) stores a `.txt` template's output **verbatim** under
+`common.RAW`, never YAML-parsed, and three validators assert against that raw string:
+`equal_raw_validator.go`, `match_regex_raw_validator.go` and
+`snapshot_raw_validator.go`. A byte difference in a `.txt` render is therefore
+observable even when nothing would change about a parsed document.
+
+So the proof has two cases: for a structured YAML manifest, if the original and the
+mutant parse to identical documents, no assertion in any suite can distinguish them —
+that is a proof, not a heuristic. For a `.txt` template, the render must match
+byte-for-byte instead, because raw text validators read the rendered string directly.
+`equivalence.Compare` implements exactly this split: exact string equality for `.txt`
+outputs, parsed comparison for everything else.
 
 ### Why "identical renders" alone is not enough
 
@@ -170,16 +179,33 @@ than being silently excluded.
 Contexts are visited in a fixed order — by suite key, then by job index within the
 suite — short-circuiting on the first difference.
 
+A render error is itself a comparable outcome, not an automatic non-match. Suites
+legitimately contain jobs that render with a required value missing and assert the
+failure (`matchFailedTemplate`), and the fixture chart has one: treating any render
+failure as inconclusive poisoned every mutant that job covered, because a mutant and
+the original both fail the same way and that agreement is real evidence, not
+uncertainty.
+
 | condition | verdict |
 |---|---|
-| mutant render differs from original in any context | `Survived` |
-| identical in every context, probe errors or differs in some context | `Equivalent` |
-| identical in every context, probe changes nothing anywhere | `Survived`, detail `not exercised by any covering test` |
-| our render of either side fails, or the chart cannot be loaded | `Survived`, detail records the reason as inconclusive |
+| mutant and original disagree in any context — either renders where the other errors, both error with different messages, or both render but the parsed output (or `.txt` bytes) differ | `Survived` |
+| mutant and original agree in every context (identical render, or identical error message), and the probe's outcome differs from the original's in some context | `Equivalent` |
+| mutant and original agree in every context, and the probe's outcome never differs from the original's | `Survived`, detail `not exercised by any covering test` |
+| our render of either side cannot be attempted at all — the chart cannot be loaded, the mutated file cannot be re-parsed, or a probe cannot be built for the span | `Survived`, detail records the reason as inconclusive |
 | the survivor has no usable contexts at all, because every covering job is skipped | `Survived`, detail records it as inconclusive |
 
 Every uncertain path lands on `Survived`. Only positive evidence removes a mutant
 from the denominator.
+
+The probe rule follows the same logic: **proof of execution is that the probe's
+outcome differs from the original's outcome** under some context — one rule that
+covers both a probe-induced render error (the `fail "canary"` substitution only
+evaluates if the span is reached) and a probe-induced output change (the
+`values.yaml` sentinel). This subsumes the simpler "a probe error proves execution"
+rule and is also correct when the original already errors: if the original errors
+and the probe produces the *same* error, that error pre-exists the probe and proves
+nothing about this span; only a probe outcome that differs from the original's is
+evidence the span ran.
 
 Against the fixture this produces the intended answers. The 14 `nindent N → N+1`
 sites probe as executed — the `fail` substitution makes the render error — and

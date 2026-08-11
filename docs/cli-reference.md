@@ -88,6 +88,7 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 | `--exclude` | comma-separated globs | *(none)* | Chart files to skip |
 | `--max-mutants` | int | `0` (no limit) | Evaluate at most this many mutants, sampled deterministically |
 | `--seed` | int | `1` | Sampling seed, for a reproducible `--max-mutants` subset |
+| `--no-equivalence-check` | bool | `false` | Skip the post-pass that reclassifies unkillable survivors as `Equivalent` |
 | `--timeout` | duration | `0` → 10× the baseline, at least 30s | Per-mutant timeout |
 
 ### `--mutators`, `--exclude-mutators`
@@ -150,15 +151,35 @@ The drop count is surfaced in every format — a silently truncated run would re
 
 ```console
 $ helm mutation-test ./my-chart --max-mutants 20
-  Score   94.7%  █████████████████████████░   (18 killed / 1 survived)
-  not scored: 1 invalid
+  Score  100.0%  ██████████████████████████   (18 killed / 0 survived)
+  not scored: 1 equivalent · 1 invalid
   only 20 of 458 generated mutants were run (--max-mutants); 438 not evaluated
 ```
 
-A sampled score is not comparable to a full one. Use `--max-mutants` for iteration, not for the
-number you publish.
+A sampled score is not comparable to a full one, even when — as above — the two numbers happen to
+match. Use `--max-mutants` for iteration, not for the number you publish.
 
 Negative values are rejected. `0` means no limit.
+
+### `--no-equivalence-check`
+
+By default, after evaluation the tool re-renders every remaining `Survived` mutant to find the ones
+that provably cannot change any rendered manifest — see
+[equivalent mutants](concepts.md#equivalent-mutants). Those are reclassified `Equivalent` and dropped
+from the score's denominator, which raises the score for any chart that has them.
+
+The check costs one extra render pair per non-equivalent survivor, and a render per covering test job
+plus a probe for each genuine equivalent — cheap relative to the worker pass, but not free on a chart
+with hundreds of survivors. `--no-equivalence-check` skips it, leaving every survivor as `Survived`
+exactly as before this feature existed.
+
+The default is on because an undetected equivalent mutant is a false positive in the report: it reads
+as a missing assertion that no assertion could ever supply, and it depresses the score by an amount
+nobody can fix by writing tests. Disable it only when the render cost matters more than that accuracy,
+for example a tight iteration loop with `--max-mutants`.
+
+Every report format states when the check was skipped, the same way every format states a
+`--max-mutants` truncation — see [reports.md](reports.md).
 
 ### `--timeout`
 
@@ -276,7 +297,7 @@ writes every report, then exits 1:
 ```console
 $ helm mutation-test ./my-chart --threshold 70
 ...
-Error: mutation score 2.1% is below the 70.0% threshold
+Error: mutation score 2.3% is below the 70.0% threshold
 $ echo $?
 1
 ```

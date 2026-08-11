@@ -45,6 +45,7 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | `internal/coverage` | Map a chart file to the suites that render it. Dependency-free by design |
 | `internal/workspace` | Per-worker chart copies; write/restore a mutation |
 | `internal/runner` | helm-unittest seam, baseline gate, executor, classification, session |
+| `internal/equivalence` | Decide whether a mutation can change any rendered manifest. Imports Helm, never `runner`. |
 | `internal/report` | Five output formats, each a pure function of `model.Run` |
 | `internal/model` | `Run`, `Mutant`, `Status`, `Tally` — the canonical model |
 | `test/integration` | Black-box tests of the built binary: exit codes, flags, every report format |
@@ -65,6 +66,14 @@ Everything else — no-coverage, invalid, timeout, error, and anything dropped b
 `--max-mutants` — is excluded from the score *and named explicitly in every report
 format*. A silently truncated or filtered run would read as full coverage. If you
 add a status or a cap, surface it in all five formats.
+
+**`Equivalent` is the fourth excluded status**, alongside no-coverage, invalid and
+the mutation-control caps: a mutation that provably cannot change any rendered
+manifest cannot be caught by any assertion either, so it leaves the denominator the
+same way. Excluding a mutant *raises* the score, so the burden of proof is high —
+every uncertain verdict in `internal/equivalence` and in
+`runner.CheckEquivalence`/`RenderContexts` must resolve to `Survived`, never to
+`Equivalent` on a guess.
 
 **A render error is not a kill.** A mutation that stops the chart rendering is
 "caught" by every test regardless of what it asserts, so it grades nothing. It
@@ -124,6 +133,17 @@ match their `go.mod`.
 **Never call `cache.StoreToFileIfNeeded()`.** A mutant run must not rewrite the
 chart's committed `__snapshot__` files. Pinned by
 `TestMutantRunsDoNotWriteSnapshots`.
+
+**`runner.RenderContexts` reproduces helm-unittest's suite-to-job value merge by
+hand**, because the equivalence pass renders with its own engine rather than going
+through helm-unittest, and that merge (`polishTestJobsPathInfo`, `getUserValues`,
+`releaseV3Option`, `capabilitiesV3` — none of it exported) is exactly what decides
+which values a covering test actually renders under. Get it wrong and the pass
+renders the wrong branch, silently making killed mutants look identical.
+`TestNoKilledMutantIsJudgedEquivalent` is the test that catches this drifting: it
+runs equivalence detection over every `Killed` mutant in the fixture and asserts
+zero equivalent verdicts, since a killed mutant demonstrably changed something a
+test observed and so must render differently under some covering context.
 
 **pflag's `UnquoteUsage` eats backticks.** The first backquoted string in a flag's
 usage becomes its displayed value type, so a backtick in a `Describe()` string
