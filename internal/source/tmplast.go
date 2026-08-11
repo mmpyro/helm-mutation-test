@@ -441,3 +441,42 @@ func cutKeyword(s, keyword string) (rest string, ok bool) {
 func isSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
+
+// EnclosingPipelineSpan returns the span of the pipeline in the innermost action
+// containing offset, excluding any leading control keyword.
+//
+// It is used to place the execution probe: replacing the pipeline with
+// `fail "canary"` yields an expression that errors only when it is evaluated, so
+// a render error proves the span executed. The keyword must survive — rewriting
+// `{{- if X }}` to `{{ fail "canary" }}` would orphan the matching `{{ end }}`
+// and produce a parse error, which happens whether or not the branch runs and
+// therefore proves nothing.
+func EnclosingPipelineSpan(f *File, offset int) (start, end int, ok bool) {
+	a, found := FindAction(f, offset)
+	if !found {
+		return 0, 0, false
+	}
+	inner := f.Slice(a.InnerStart, a.InnerEnd)
+
+	// Longest keyword first, so "else if" wins over a bare "if" prefix match.
+	lead := 0
+	for _, kw := range []string{"else with", "else if", "range", "with", "if"} {
+		if rest, cut := cutKeyword(inner, kw); cut {
+			lead = len(inner) - len(rest)
+			break
+		}
+	}
+
+	start = a.InnerStart + lead
+	end = a.InnerEnd
+	for start < end && isSpace(f.Bytes[start]) {
+		start++
+	}
+	for end > start && isSpace(f.Bytes[end-1]) {
+		end--
+	}
+	if end <= start {
+		return 0, 0, false
+	}
+	return start, end, true
+}

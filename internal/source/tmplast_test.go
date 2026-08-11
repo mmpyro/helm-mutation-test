@@ -335,3 +335,49 @@ func TestSkipQuoted(t *testing.T) {
 		})
 	}
 }
+
+func TestEnclosingPipelineSpanKeepsKeywordsAndTrimMarkers(t *testing.T) {
+	// The probe replaces a pipeline with `fail "canary"`, which errors only when
+	// evaluated. Overwriting the keyword too would break block structure and turn
+	// a runtime signal into a parse error, which proves nothing about execution.
+	tests := []struct {
+		name string
+		src  string
+		// needle is a substring of src; the span is looked up at its offset.
+		needle  string
+		wantSub string
+	}{
+		{"plain action", `x: {{ .Values.a }}`, ".Values.a", ".Values.a"},
+		{"trimmed action", "x: {{- .Values.a -}}\n", ".Values.a", ".Values.a"},
+		{"pipeline", `x: {{ include "c.name" . | nindent 4 }}`, "nindent", `include "c.name" . | nindent 4`},
+		{"if", "{{- if .Values.a.enabled }}\nx: 1\n{{- end }}", ".Values.a.enabled", ".Values.a.enabled"},
+		{"with", "{{- with .Values.a }}\nx: 1\n{{- end }}", ".Values.a", ".Values.a"},
+		{"range", "{{- range .Values.list }}\n- {{ . }}\n{{- end }}", ".Values.list", ".Values.list"},
+		{"else if", "{{- if .A }}\n{{- else if .Values.b }}\nx: 1\n{{- end }}", ".Values.b", ".Values.b"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			off := strings.Index(tc.src, tc.needle)
+			if off < 0 {
+				t.Fatalf("needle %q not in source", tc.needle)
+			}
+			start, end, ok := EnclosingPipelineSpan(f, off)
+			if !ok {
+				t.Fatal("EnclosingPipelineSpan returned !ok")
+			}
+			if got := f.Slice(start, end); got != tc.wantSub {
+				t.Fatalf("span = %q, want %q", got, tc.wantSub)
+			}
+		})
+	}
+}
+
+func TestEnclosingPipelineSpanRefusesPlainText(t *testing.T) {
+	// A yaml-key-delete span in a template's literal text has no action to probe.
+	src := "metadata:\n  name: plain\n"
+	f := mk(t, src)
+	if _, _, ok := EnclosingPipelineSpan(f, strings.Index(src, "plain")); ok {
+		t.Fatal("want !ok for an offset outside any action")
+	}
+}
