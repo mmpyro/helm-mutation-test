@@ -516,3 +516,32 @@ func TestProbeSpanRefusesUnparseableTemplates(t *testing.T) {
 		t.Fatal("want !ok when the template does not parse")
 	}
 }
+
+// TestMutationPrecedesUndelimitedCall pins the soundness argument ProbeSpan
+// relies on when shortCircuitGuards cannot delimit an and/or call: operands
+// always start at or after the call's id token, so a mutation strictly before
+// that token is provably outside the call and safe to probe widely, while
+// anything at or after it might sit in a skipped operand and must be refused.
+//
+// commandExtent/operandEnd failing on a real and/or is not reachable through
+// any template a reviewer could construct — FindAction refuses first — so this
+// exercises the position comparison directly rather than contorting a template
+// to reach it.
+func TestMutationPrecedesUndelimitedCall(t *testing.T) {
+	tests := []struct {
+		name         string
+		start, idPos int
+		want         bool
+	}{
+		{"mutation strictly before the id token: outside the call, probe stands", 5, 10, true},
+		{"mutation at the id token: may be inside the call, refuse", 10, 10, false},
+		{"mutation after the id token: may be inside the call, refuse", 15, 10, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mutationPrecedesUndelimitedCall(tc.start, tc.idPos); got != tc.want {
+				t.Fatalf("mutationPrecedesUndelimitedCall(%d, %d) = %v, want %v", tc.start, tc.idPos, got, tc.want)
+			}
+		})
+	}
+}

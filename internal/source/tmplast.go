@@ -527,8 +527,15 @@ func ProbeSpan(f *File, start, end int) (ps, pe int, ok bool) {
 		return 0, 0, false
 	}
 
+	allGuards, undelimited := shortCircuitGuards(f, tree)
+	for _, idPos := range undelimited {
+		if !mutationPrecedesUndelimitedCall(start, idPos) {
+			return 0, 0, false
+		}
+	}
+
 	var guards []shortCircuitGuard
-	for _, g := range shortCircuitGuards(f, tree) {
+	for _, g := range allGuards {
 		if g.covers(start, end) {
 			guards = append(guards, g)
 		}
@@ -570,13 +577,19 @@ type shortCircuitGuard struct {
 }
 
 // shortCircuitGuards returns every region of the template that an `and` or `or`
-// may decline to evaluate. They are the only text/template constructs that skip
-// an argument: both stop at the operand that decides the result, so anything from
-// the second operand onward may never run even when the surrounding action does.
-// The first operand is always evaluated once the call is, and so is excluded —
-// otherwise a mutation of the whole condition would lose its probe for no reason.
-func shortCircuitGuards(f *File, t *Tree) []shortCircuitGuard {
-	var out []shortCircuitGuard
+// may decline to evaluate, plus the id-token position of every `and`/`or` call it
+// found but could not delimit. They are the only text/template constructs that
+// skip an argument: both stop at the operand that decides the result, so anything
+// from the second operand onward may never run even when the surrounding action
+// does. The first operand is always evaluated once the call is, and so is
+// excluded — otherwise a mutation of the whole condition would lose its probe for
+// no reason.
+//
+// An undelimitable call is reported rather than silently dropped: ProbeSpan
+// cannot tell whether the mutation it was asked about sits in that call's
+// skippable region, and omitting it here would let the wide pipeline probe stand
+// unchallenged — the exact unsoundness this function exists to prevent.
+func shortCircuitGuards(f *File, t *Tree) (guards []shortCircuitGuard, undelimited []int) {
 	t.Walk(func(n parse.Node) bool {
 		cmd, ok := n.(*parse.CommandNode)
 		if !ok || isNilNode(cmd) || len(cmd.Args) < 3 {
@@ -588,20 +601,35 @@ func shortCircuitGuards(f *File, t *Tree) []shortCircuitGuard {
 		}
 		callStart, callEnd, ok := commandExtent(f, int(id.Position()))
 		if !ok {
+			undelimited = append(undelimited, int(id.Position()))
 			return true
 		}
 		firstOperand := SkipSpaceForward(f, callStart+len(id.Ident), callEnd)
 		skipFrom, ok := operandEnd(f, firstOperand, callEnd)
 		if !ok {
+			undelimited = append(undelimited, int(id.Position()))
 			return true
 		}
-		out = append(out, shortCircuitGuard{
+		guards = append(guards, shortCircuitGuard{
 			byteSpan: byteSpan{skipFrom, callEnd},
 			call:     byteSpan{callStart, callEnd},
 		})
 		return true
 	})
-	return out
+	return guards, undelimited
+}
+
+// mutationPrecedesUndelimitedCall reports whether a mutation at start is provably
+// outside the and/or call whose id token sits at idPos, when that call's extent
+// could not be established.
+//
+// In `and X Y` / `or X Y` every operand appears after the id token, so a mutation
+// starting strictly before idPos cannot be inside the call regardless of where
+// the call actually ends — it is safe to ignore. A mutation at or after idPos
+// might sit in an operand the call could skip, and with no delimited extent to
+// check that against, ProbeSpan must refuse rather than guess.
+func mutationPrecedesUndelimitedCall(start, idPos int) bool {
+	return start < idPos
 }
 
 // innermostParenPipeline returns the content span of the narrowest parenthesised
