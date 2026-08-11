@@ -23,6 +23,11 @@ const (
 	// such a mutant, so it carries no information about test quality and is excluded
 	// from the score.
 	StatusInvalid Status = "Invalid"
+	// StatusEquivalent means the mutation provably cannot change any rendered
+	// manifest: the chart renders to identical parsed documents under every value
+	// set the covering tests use, and the mutated span was proven to execute. No
+	// assertion could distinguish it, so it is excluded from the score.
+	StatusEquivalent Status = "Equivalent"
 	// StatusTimeout means the mutant run exceeded the per-mutant timeout.
 	StatusTimeout Status = "Timeout"
 	// StatusError means the tool itself failed on this mutant (copy, load, parse).
@@ -85,6 +90,7 @@ type Tally struct {
 	Survived   int `json:"survived"`
 	NoCoverage int `json:"noCoverage"`
 	Invalid    int `json:"invalid"`
+	Equivalent int `json:"equivalent"`
 	Timeout    int `json:"timeout"`
 	Errored    int `json:"error"`
 }
@@ -100,6 +106,8 @@ func (t *Tally) Add(s Status) {
 		t.NoCoverage++
 	case StatusInvalid:
 		t.Invalid++
+	case StatusEquivalent:
+		t.Equivalent++
 	case StatusTimeout:
 		t.Timeout++
 	case StatusError:
@@ -109,7 +117,7 @@ func (t *Tally) Add(s Status) {
 
 // Total is the number of mutants counted, across every status.
 func (t Tally) Total() int {
-	return t.Killed + t.Survived + t.NoCoverage + t.Invalid + t.Timeout + t.Errored
+	return t.Killed + t.Survived + t.NoCoverage + t.Invalid + t.Equivalent + t.Timeout + t.Errored
 }
 
 // Scored is the score denominator: mutants that actually tell us something.
@@ -163,6 +171,10 @@ type Run struct {
 	// Capped is how many mutants the cap discarded. Reported explicitly: a silent
 	// truncation would read as full coverage.
 	Capped int `json:"capped"`
+	// EquivalenceChecked records whether the equivalence pass ran. Without it,
+	// "equivalent 0" is ambiguous between "checked and found none" and "never
+	// looked", and the second reads as the first.
+	EquivalenceChecked bool `json:"equivalenceChecked"`
 	// SkippedFiles records files excluded from AST mutation (e.g. parse failures).
 	SkippedFiles []SkippedFile `json:"skippedFiles,omitempty"`
 
@@ -224,6 +236,9 @@ func (r *Run) Survived() []Mutant { return r.withStatus(StatusSurvived) }
 
 // NoCoverage returns the mutants no suite exercised.
 func (r *Run) NoCoverage() []Mutant { return r.withStatus(StatusNoCoverage) }
+
+// Equivalent returns the mutants proven unable to change any rendered manifest.
+func (r *Run) Equivalent() []Mutant { return r.withStatus(StatusEquivalent) }
 
 func (r *Run) withStatus(s Status) []Mutant {
 	var out []Mutant

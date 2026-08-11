@@ -134,3 +134,35 @@ func TestWithStatusFilters(t *testing.T) {
 		t.Fatalf("NoCoverage() = %+v", got)
 	}
 }
+
+func TestEquivalentIsExcludedFromTheScore(t *testing.T) {
+	// An equivalent mutant cannot change any rendered manifest, so no assertion
+	// could ever catch it. Counting it as survived would depress the score by an
+	// amount no test author can fix.
+	if StatusEquivalent.CountsTowardScore() {
+		t.Fatal("Equivalent must not count toward the score")
+	}
+	tl := Tally{Killed: 9, Survived: 1, Equivalent: 90}
+	if got := tl.Score(); got != 90 {
+		t.Fatalf("Score() = %v, want 90 (equivalents out of the denominator)", got)
+	}
+	if got := tl.Total(); got != 100 {
+		t.Fatalf("Total() = %d, want 100 (equivalents still counted as mutants)", got)
+	}
+}
+
+func TestEquivalentTallyAndAccessor(t *testing.T) {
+	r := Run{Mutants: []Mutant{
+		{ID: "1", Status: StatusEquivalent},
+		{ID: "2", Status: StatusSurvived},
+		{ID: "3", Status: StatusEquivalent},
+	}}
+	r.ComputeTally()
+	if r.Tally.Equivalent != 2 {
+		t.Fatalf("Tally.Equivalent = %d, want 2", r.Tally.Equivalent)
+	}
+	got := r.Equivalent()
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "3" {
+		t.Fatalf("Equivalent() = %+v", got)
+	}
+}
