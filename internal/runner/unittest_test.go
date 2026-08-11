@@ -97,6 +97,73 @@ func writeSuite(t *testing.T, dir, name, content string) []*Suite {
 	return suites
 }
 
+// writeFile drops an arbitrary file into a copy of the fixture chart, for
+// values files a suite or job references by relative path.
+func writeFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMergedValuesPrecedence(t *testing.T) {
+	// Every value source getUserValues merges, in one scenario, so dropping any
+	// one of them - not just getting the order backwards - shows up as a
+	// failure: a suite-level values file, a job-level values file that must win
+	// over it on a shared key, a suite-level `set` key the job overrides, and a
+	// job-only `set` key. Silently dropping a source renders under the wrong
+	// values, which is the "wrong branch" failure mode equivalence detection
+	// cannot tolerate.
+	dir := fixture(t)
+	writeFile(t, dir, "tests/values-suite.yaml", "shared: from-suite-file\nfileOnly: from-suite-file-only\n")
+	writeFile(t, dir, "tests/values-job.yaml", "shared: from-job-file\n")
+
+	suites := writeSuite(t, dir, "values_merge_test.yaml", `
+suite: value merge precedence
+values:
+  - values-suite.yaml
+set:
+  setShared: from-suite-set
+  setSuiteOnly: from-suite-set-only
+tests:
+  - it: overrides the shared keys and adds its own
+    values:
+      - values-job.yaml
+    set:
+      setShared: from-job-set
+      jobOnlySet: only-job-set
+    asserts:
+      - isKind:
+          of: Deployment
+`)
+	ctxs, err := RenderContexts(dir, suites[0])
+	if err != nil {
+		t.Fatalf("RenderContexts: %v", err)
+	}
+	if len(ctxs) != 1 {
+		t.Fatalf("want 1 context, got %d", len(ctxs))
+	}
+	vals := ctxs[0].Values
+	if vals["shared"] != "from-job-file" {
+		t.Fatalf("job values file must win over the suite's on a shared key, got %v", vals["shared"])
+	}
+	if vals["fileOnly"] != "from-suite-file-only" {
+		t.Fatalf("a suite-only values-file key must still be present, got %v", vals["fileOnly"])
+	}
+	if vals["setShared"] != "from-job-set" {
+		t.Fatalf("job set must win over the suite's set, got %v", vals["setShared"])
+	}
+	// A key the job never touches: this is the one assertion that fails if the
+	// suite's `set` is dropped entirely rather than merely losing precedence
+	// ties, since setShared would still read "from-job-set" either way.
+	if vals["setSuiteOnly"] != "from-suite-set-only" {
+		t.Fatalf("a suite-only set key must still be present, got %v", vals["setSuiteOnly"])
+	}
+	if vals["jobOnlySet"] != "only-job-set" {
+		t.Fatalf("a job-only set key must be present, got %v", vals["jobOnlySet"])
+	}
+}
+
 func TestReleaseOptionsDefaultToHelmsOwnZeroValues(t *testing.T) {
 	// A naive reconstruction is tempted to default Revision to 1, as a first
 	// install has. helm-unittest never does: releaseV3Option only defaults Name
