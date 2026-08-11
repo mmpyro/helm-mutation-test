@@ -50,8 +50,45 @@ type Checker struct {
 	files map[string]*source.File
 
 	mu       sync.Mutex
-	original map[string]map[string]string // context name -> manifests
-	probed   map[string]bool              // span key + context set -> was the span proven to execute
+	original map[string]outcome // context name -> render outcome
+	probed   map[string]bool    // span key + context set -> was the span proven to execute
+}
+
+// outcome is what rendering one chart under one context produced: either
+// manifests, or a render error. A render error is itself an observable
+// outcome — helm-unittest's matchFailedTemplate validator asserts on the error
+// text (pkg/unittest/validators/failed_template_validator.go), so a mutation
+// that leaves that text unchanged is invisible to it. Treating a render error
+// as an automatic non-match would make every mutation covered by such a suite
+// job inconclusive, which is exactly the bug this type fixes.
+type outcome struct {
+	manifests map[string]string
+	errText   string // empty if the render succeeded
+}
+
+// renderOutcome renders chrt under ctx and folds a render error into the
+// outcome instead of returning it: the caller's own failures (an unparseable
+// mutated file, an unloadable chart) are errors, but a chart failing to
+// render under a real value set is data.
+func renderOutcome(chrt *chart.Chart, ctx RenderContext) outcome {
+	manifests, err := Render(chrt, ctx)
+	if err != nil {
+		return outcome{errText: err.Error()}
+	}
+	return outcome{manifests: manifests}
+}
+
+// sameOutcome reports whether two outcomes are indistinguishable to any
+// assertion. Both erroring identically is a match; one erroring and the other
+// not, or the two error texts differing, is a real difference.
+func sameOutcome(a, b outcome) (bool, error) {
+	if (a.errText == "") != (b.errText == "") {
+		return false, nil
+	}
+	if a.errText != "" {
+		return a.errText == b.errText, nil
+	}
+	return Compare(a.manifests, b.manifests)
 }
 
 // NewChecker returns a checker over a loaded chart and the source files the
@@ -60,7 +97,7 @@ func NewChecker(base *chart.Chart, files map[string]*source.File) *Checker {
 	return &Checker{
 		base:     base,
 		files:    files,
-		original: map[string]map[string]string{},
+		original: map[string]outcome{},
 		probed:   map[string]bool{},
 	}
 }
@@ -87,17 +124,9 @@ func (c *Checker) Judge(m Mutation, ctxs []RenderContext) Verdict {
 	}
 
 	for _, ctx := range ctxs {
-		before, err := c.renderOriginal(ctx)
-		if err != nil {
-			return Verdict{Detail: "inconclusive: " + err.Error()}
-		}
-		after, err := Render(mutated, ctx)
-		if err != nil {
-			// The mutant rendered fine under helm-unittest or it would not have
-			// survived, so a failure here is our renderer disagreeing, not evidence.
-			return Verdict{Detail: "inconclusive: " + err.Error()}
-		}
-		same, err := Compare(before, after)
+		before := c.renderOriginal(ctx)
+		after := renderOutcome(mutated, ctx)
+		same, err := sameOutcome(before, after)
 		if err != nil {
 			return Verdict{Detail: "inconclusive: " + err.Error()}
 		}
@@ -122,21 +151,18 @@ func (c *Checker) Judge(m Mutation, ctxs []RenderContext) Verdict {
 
 // renderOriginal renders the unmutated chart under ctx, memoised by context name
 // so every survivor shares one render per context.
-func (c *Checker) renderOriginal(ctx RenderContext) (map[string]string, error) {
+func (c *Checker) renderOriginal(ctx RenderContext) outcome {
 	c.mu.Lock()
 	cached, ok := c.original[ctx.Name]
 	c.mu.Unlock()
 	if ok {
-		return cached, nil
+		return cached
 	}
-	out, err := Render(c.base, ctx)
-	if err != nil {
-		return nil, err
-	}
+	out := renderOutcome(c.base, ctx)
 	c.mu.Lock()
 	c.original[ctx.Name] = out
 	c.mu.Unlock()
-	return out, nil
+	return out
 }
 
 // probeExecuted reports whether the mutated span demonstrably runs under ctxs.
@@ -146,9 +172,12 @@ func (c *Checker) renderOriginal(ctx RenderContext) (map[string]string, error) {
 // just the span, or a later call with a narrower or different set of contexts
 // could read a stale true and call a survivor equivalent on evidence it never saw.
 //
-// A render error counts as proof: the probe's `fail` evaluates only when it is
-// reached. So does any change in output, which is what the values.yaml sentinel
-// produces.
+// The probe proves execution iff its outcome differs from the original's under
+// some context — one rule that subsumes both a probe-induced render error (the
+// `fail` only evaluates if reached) and a probe-induced output change (the
+// values.yaml sentinel). It cannot be "the probe errored" alone: if the
+// original already errors identically, that error pre-exists the probe and
+// proves nothing about whether this particular span ran.
 func (c *Checker) probeExecuted(m Mutation, f *source.File, ctxs []RenderContext) (bool, error) {
 	key := m.spanKey() + "|" + contextsKey(ctxs)
 	c.mu.Lock()
@@ -169,16 +198,9 @@ func (c *Checker) probeExecuted(m Mutation, f *source.File, ctxs []RenderContext
 
 	executed := false
 	for _, ctx := range ctxs {
-		before, err := c.renderOriginal(ctx)
-		if err != nil {
-			return false, err
-		}
-		after, err := Render(probeChart, ctx)
-		if err != nil {
-			executed = true // the probe's fail was evaluated
-			break
-		}
-		same, err := Compare(before, after)
+		before := c.renderOriginal(ctx)
+		after := renderOutcome(probeChart, ctx)
+		same, err := sameOutcome(before, after)
 		if err != nil {
 			return false, err
 		}

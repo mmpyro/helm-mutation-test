@@ -110,6 +110,46 @@ func TestProbeProofDoesNotLeakAcrossDifferentContextSets(t *testing.T) {
 	}
 }
 
+func TestJudgeCallsAMutationEquivalentWhenARequiredCheckAbortsIdenticallyAfterIt(t *testing.T) {
+	// A test job that deliberately renders with a required value missing (and
+	// asserts on the failure, via matchFailedTemplate) makes the whole render
+	// fail identically before and after — Helm's engine executes into a buffer
+	// it only commits on success, so a mutation upstream of the abort changes
+	// nothing about the outcome the suite can observe. The probe proves the
+	// mutated span itself still ran: injected before the abort, its own
+	// distinct failure preempts "boom".
+	src := `replicas: {{ .Values.replicas }}` + "\n" + `{{ required "boom" .Values.apiToken }}` + "\n"
+	c, f := judgeFixture(t, src, map[string]any{"replicas": 3})
+	v := c.Judge(mutationAt(t, f, ".Values.replicas", "99"), []RenderContext{{Name: "ctx"}})
+	if !v.Equivalent {
+		t.Fatalf("want equivalent, got survived: %s", v.Detail)
+	}
+}
+
+func TestJudgeKeepsADifferingRenderFailureSurvived(t *testing.T) {
+	// Both sides fail to render, but with different error text. helm-unittest's
+	// matchFailedTemplate asserts on that text, so it is a real difference and
+	// must not be folded into "both erred, therefore equivalent".
+	src := `{{ required "boom" .Values.apiToken }}` + "\n"
+	c, f := judgeFixture(t, src, nil)
+	v := c.Judge(mutationAt(t, f, "boom", "bang"), []RenderContext{{Name: "ctx"}})
+	if v.Equivalent {
+		t.Fatal("a mutation that changes the render-failure text must not be called equivalent")
+	}
+}
+
+func TestJudgeKeepsSurvivedWhenOnlyTheMutantFailsToRender(t *testing.T) {
+	// The original renders fine; the mutation introduces a failure. That is the
+	// clearest possible observable difference and must never be called
+	// equivalent just because a render "error" is now a comparable outcome.
+	src := `replicas: {{ .Values.replicas }}` + "\n"
+	c, f := judgeFixture(t, src, map[string]any{"replicas": 3})
+	v := c.Judge(mutationAt(t, f, ".Values.replicas", `fail "boom"`), []RenderContext{{Name: "ctx"}})
+	if v.Equivalent {
+		t.Fatal("a mutation that makes a previously-clean render fail must not be called equivalent")
+	}
+}
+
 func TestJudgeIsSafeForConcurrentCallers(t *testing.T) {
 	// Task 8 calls Judge from a worker pool. Sequential tests under -race prove
 	// nothing about that; this drives the shared render and probe caches from

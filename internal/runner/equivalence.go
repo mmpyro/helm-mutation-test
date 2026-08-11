@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/mmpyro/helm-mutation-test/internal/equivalence"
@@ -38,7 +39,7 @@ func CheckEquivalence(ctx context.Context, mutants []model.Mutant, in Equivalenc
 		return 0
 	}
 
-	ctxsBySuiteFile, skipFiles := contextsBySuiteFile(in)
+	ctxsBySuiteFile, skipReasons := contextsBySuiteFile(in)
 	checker := equivalence.NewChecker(chart, in.Files)
 
 	var (
@@ -54,7 +55,7 @@ func CheckEquivalence(ctx context.Context, mutants []model.Mutant, in Equivalenc
 			defer wg.Done()
 			for i := range queue {
 				m := mutants[i]
-				verdict := judgeOne(checker, m, ctxsBySuiteFile, skipFiles)
+				verdict := judgeOne(checker, m, ctxsBySuiteFile, skipReasons)
 				mu.Lock()
 				if verdict.Equivalent {
 					mutants[i].Status = model.StatusEquivalent
@@ -83,12 +84,12 @@ func judgeOne(
 	checker *equivalence.Checker,
 	m model.Mutant,
 	ctxsBySuiteFile map[string][]equivalence.RenderContext,
-	skipFiles map[string]bool,
+	skipReasons map[string]string,
 ) equivalence.Verdict {
 	var ctxs []equivalence.RenderContext
 	for _, file := range m.CoveringSuites {
-		if skipFiles[file] {
-			return equivalence.Verdict{Detail: "not checked: a covering suite uses a fake Kubernetes provider"}
+		if reason, ok := skipReasons[file]; ok {
+			return equivalence.Verdict{Detail: reason}
 		}
 		ctxs = append(ctxs, ctxsBySuiteFile[file]...)
 	}
@@ -103,18 +104,20 @@ func judgeOne(
 // contextsBySuiteFile groups every suite's render contexts by suite file, which
 // is the granularity Mutant.CoveringSuites records. A suite whose contexts
 // cannot be extracted, or which uses a fake Kubernetes provider, is recorded in
-// the skip set so its mutants are left alone rather than judged on partial input.
-func contextsBySuiteFile(in EquivalenceInput) (map[string][]equivalence.RenderContext, map[string]bool) {
+// the skip map so its mutants are left alone rather than judged on partial
+// input — keyed by reason text, not a bare bool, so a report never blames a
+// parse failure on the Kubernetes-provider guard or vice versa.
+func contextsBySuiteFile(in EquivalenceInput) (map[string][]equivalence.RenderContext, map[string]string) {
 	byFile := map[string][]equivalence.RenderContext{}
-	skip := map[string]bool{}
+	skip := map[string]string{}
 	for _, s := range in.Suites {
 		if s.UsesKubernetesProvider() {
-			skip[s.Key.File] = true
+			skip[s.Key.File] = "not checked: a covering suite uses a fake Kubernetes provider"
 			continue
 		}
 		ctxs, err := RenderContexts(in.ChartDir, s)
 		if err != nil {
-			skip[s.Key.File] = true
+			skip[s.Key.File] = fmt.Sprintf("not checked: extracting render contexts for %s: %s", s.Key, err)
 			continue
 		}
 		byFile[s.Key.File] = append(byFile[s.Key.File], ctxs...)
