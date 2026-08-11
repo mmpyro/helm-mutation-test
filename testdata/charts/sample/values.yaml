@@ -6,20 +6,84 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
+# terminationGracePeriodSeconds is deliberately not declared here, so the
+# template's `| default 30` fallback is what actually renders.
+
 serviceAccount:
   create: true
   name: ""
+  # automount is deliberately not declared, so the template's `| default true`
+  # fallback decides.
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+
+securityContext:
+  runAsUser: 1000
+  fsGroup: 2000
+  # runAsNonRoot is deliberately not declared; the template defaults it to true.
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+probes:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  # 0 disables the memory metric
+  targetMemoryUtilizationPercentage: 0
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
 
 service:
   type: ClusterIP
   port: 80
+  # true keeps the client source IP, at the cost of uneven load spreading
   external: false
+
+metrics:
+  enabled: true
+  port: 9090
 
 ingress:
   enabled: false
+  className: nginx
   host: chart.example.com
+  path: /
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  tls:
+    enabled: false
+    secretName: sample-tls
+
+config:
+  # logLevel is deliberately not declared; the template defaults it to "info".
+  logFormat: json
+  maxConnections: 256
+  requestTimeoutSeconds: 30
+  cacheSizeMb: 64
+  backoffFactor: 1.5
+  debug: false
 
 env: dev
 
 # Consumed via `required`, so a missing value must fail the render
 apiToken: fixture-token
+adminEmail: ops@example.com

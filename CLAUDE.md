@@ -23,8 +23,9 @@ make demo        # score the fixture chart with both suites
 make install     # install as a real Helm plugin from this directory
 ```
 
-The `runner` package tests take ~40s under `-race` because they spawn worker
-subprocesses and run real chart renders. That is expected, not a hang.
+The `runner` package tests take ~3min under `-race` because they spawn worker
+subprocesses and run real chart renders — the fixture chart yields ~460 mutants
+and several tests score it end to end. That is expected, not a hang.
 
 ## Architecture
 
@@ -147,9 +148,10 @@ saying *why* the property matters when it is not obvious. Keep that style.
   them automatically: no no-op candidates, no inverted spans, no panics on
   unparseable templates, mutants still parse.
 - **The fixture chart is the tool's own test.** `testdata/charts/sample` ships a
-  deliberately weak suite and a thorough one over the same templates. Both must
-  pass `helm unittest`; the weak one must score under 45% and the strong one over
-  70%. If you change the chart or a mutator, re-check
+  deliberately weak suite and a thorough one; both cover `deployment.yaml` and
+  `service.yaml`, and the thorough one additionally covers the other five
+  templates. Both must pass `helm unittest`; the weak one must score under 45%
+  and the strong one over 70%. If you change the chart or a mutator, re-check
   `TestWeakSuiteScoresLowAndStrongScoresHigh` — it is the end-to-end guard, and CI
   also fails if the weak suite ever scores above 50%.
 - `internal/runner/baseline_test.go`'s `TestMain` doubles as the worker entry point

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sample.fullname" . }}-config
+  labels:
+    {{- include "sample.labels" . | nindent 4 }}
+data:
+  log-level: {{ .Values.config.logLevel | default "info" | quote }}
+  log-format: {{ .Values.config.logFormat | quote }}
+  max-connections: {{ .Values.config.maxConnections | quote }}
+  request-timeout-seconds: {{ .Values.config.requestTimeoutSeconds | quote }}
+  backoff-factor: {{ .Values.config.backoffFactor | quote }}
+  trace-sample-ratio: {{ .Values.config.traceSampleRatio | default 0.1 | quote }}
+  cache-size-mb: {{ .Values.config.cacheSizeMb | quote }}
+  # Below 64 MB the cache costs more in bookkeeping than it saves.
+  cache-enabled: {{ ge (int .Values.config.cacheSizeMb) 64 | quote }}
+  # Retrying hard only pays off while the request timeout is short.
+  retry-policy: {{ ternary "aggressive" "conservative" (lt (int .Values.config.requestTimeoutSeconds) 30) | quote }}
+  # One worker keeps up to the burst threshold; past it, fan out.
+  worker-count: {{ ternary 1 4 (le (int .Values.config.maxConnections) 256) | quote }}
+  shutdown-drain: "true"
+  metrics-path: /metrics
+  {{- if or .Values.config.debug (eq .Values.env "dev") }}
+  verbose-errors: "true"
+  {{- end }}
+  {{- if and .Values.metrics.enabled (ne .Values.env "prod") }}
+  profiling: "true"
+  {{- end }}

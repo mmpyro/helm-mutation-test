@@ -83,12 +83,12 @@ func TestRunBaselinePassesOnTheFixture(t *testing.T) {
 	if b.ChartName != "sample" {
 		t.Errorf("chart name = %q, want sample", b.ChartName)
 	}
-	// The strong suite file declares three suites separated by "---".
-	if len(b.Suites) != 3 {
-		t.Errorf("got %d suites, want 3: %+v", len(b.Suites), b.Suites)
+	// The strong suite file declares one suite per template, separated by "---".
+	if len(b.Suites) != 7 {
+		t.Errorf("got %d suites, want 7: %+v", len(b.Suites), b.Suites)
 	}
-	if b.TestCount != 14 {
-		t.Errorf("got %d tests, want 14", b.TestCount)
+	if b.TestCount != 43 {
+		t.Errorf("got %d tests, want 43", b.TestCount)
 	}
 	if b.Duration <= 0 {
 		t.Error("baseline duration should be recorded, it seeds the per-mutant timeout")
@@ -115,8 +115,8 @@ func TestRunBaselineCapturesSuiteMetadataForCoverage(t *testing.T) {
 	if dep.CoversAllTemplates() {
 		t.Error("a suite declaring templates does not cover everything")
 	}
-	if len(dep.TestNames) != 10 {
-		t.Errorf("got %d test names, want 10: %v", len(dep.TestNames), dep.TestNames)
+	if len(dep.TestNames) != 17 {
+		t.Errorf("got %d test names, want 17: %v", len(dep.TestNames), dep.TestNames)
 	}
 }
 

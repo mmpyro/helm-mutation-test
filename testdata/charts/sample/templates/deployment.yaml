@@ -5,30 +5,81 @@ metadata:
   labels:
     {{- include "sample.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Chart.Name }}
+      {{- include "sample.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      labels:
-        app.kubernetes.io/name: {{ .Chart.Name }}
-    spec:
-      {{- if .Values.serviceAccount.create }}
-      serviceAccountName: {{ include "sample.serviceAccountName" . }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
+      labels:
+        {{- include "sample.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sample.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
+      hostNetwork: false
+      securityContext:
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot | default true }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
           ports:
             - name: http
               containerPort: 80
               protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          {{- if .Values.probes.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.path }}
+              port: http
+            # Liveness reacts more slowly than readiness on purpose: a pod that is
+            # merely busy should be taken out of the endpoints, not restarted.
+            initialDelaySeconds: {{ mul .Values.probes.initialDelaySeconds 2 }}
+            periodSeconds: {{ .Values.probes.periodSeconds }}
+            failureThreshold: {{ .Values.probes.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sample.fullname" . }}-config
           env:
             - name: API_TOKEN
               value: {{ required "apiToken is required" .Values.apiToken | quote }}
+            - name: ADMIN_EMAIL
+              value: {{ required "adminEmail is required" .Values.adminEmail }}
+            - name: LOG_FORMAT
+              value: "json"
             {{- if eq .Values.env "prod" }}
             - name: PRODUCTION
+              value: "true"
+            {{- else if eq .Values.env "staging" }}
+            - name: STAGING
               value: "true"
             {{- end }}

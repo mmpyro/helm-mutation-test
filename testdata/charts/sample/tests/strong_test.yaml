@@ -1,9 +1,10 @@
-# A THOROUGH suite over the same templates.
+# A THOROUGH suite, one sub-suite per template.
 #
 # Every rendered field is pinned to an exact value, both branches of each
-# conditional are exercised, and the `required` guard has a negative test. This
-# suite is expected to score HIGH: almost any mutation to the chart should make
-# one of these assertions fail.
+# conditional are exercised, each computed threshold is tested on both sides of
+# its boundary, and every `required` guard has a negative test. This suite is
+# expected to score HIGH: almost any mutation to the chart should make one of
+# these assertions fail.
 suite: strong assertions on the deployment
 templates:
   - deployment.yaml
@@ -12,12 +13,74 @@ tests:
     asserts:
       - isKind:
           of: Deployment
+      - isAPIVersion:
+          of: apps/v1
       - equal:
           path: metadata.name
           value: RELEASE-NAME-sample
       - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+      - equal:
           path: spec.replicas
           value: 2
+      - equal:
+          path: spec.revisionHistoryLimit
+          value: 3
+      - equal:
+          path: spec.selector.matchLabels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: spec.selector.matchLabels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: spec.template.metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: spec.template.metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: spec.template.metadata.annotations['prometheus.io/scrape']
+          value: "true"
+      - equal:
+          path: spec.template.metadata.annotations['prometheus.io/port']
+          value: "9090"
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: RELEASE-NAME-sample
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 30
+      - equal:
+          path: spec.template.spec.hostNetwork
+          value: false
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 1000
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 2000
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: sample
       - equal:
           path: spec.template.spec.containers[0].image
           value: "nginx:1.16.0"
@@ -25,26 +88,140 @@ tests:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: IfNotPresent
       - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.privileged
+          value: false
+
+  - it: exposes the http and metrics ports
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].ports
+          count: 2
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].name
+          value: http
+      - equal:
           path: spec.template.spec.containers[0].ports[0].containerPort
           value: 80
       - equal:
           path: spec.template.spec.containers[0].ports[0].protocol
           value: TCP
       - equal:
-          path: spec.selector.matchLabels['app.kubernetes.io/name']
-          value: sample
+          path: spec.template.spec.containers[0].ports[1].name
+          value: metrics
       - equal:
-          path: metadata.labels['app.kubernetes.io/managed-by']
-          value: Helm
+          path: spec.template.spec.containers[0].ports[1].containerPort
+          value: 9090
+      - equal:
+          path: spec.template.spec.containers[0].ports[1].protocol
+          value: TCP
 
-  - it: mounts the api token from values
+  - it: drops the metrics port when metrics are disabled
+    set:
+      metrics.enabled: false
     asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].ports
+          count: 1
+
+  - it: configures both probes from values
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
+          value: 5
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.periodSeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.timeoutSeconds
+          value: 2
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.failureThreshold
+          value: 3
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: http
+      # Twice the readiness delay, by design.
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.initialDelaySeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+          value: 3
+
+  - it: omits both probes when they are disabled
+    set:
+      probes.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe
+
+  - it: pins the resource requests and limits
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 500m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 256Mi
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 100m
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 128Mi
+
+  - it: reads its settings from the chart's config map
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].envFrom
+          count: 1
+      - equal:
+          path: spec.template.spec.containers[0].envFrom[0].configMapRef.name
+          value: RELEASE-NAME-sample-config
+
+  - it: mounts the api token, admin email and log format from values
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 3
       - equal:
           path: spec.template.spec.containers[0].env[0].name
           value: API_TOKEN
       - equal:
           path: spec.template.spec.containers[0].env[0].value
           value: fixture-token
+      - equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: ADMIN_EMAIL
+      - equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: ops@example.com
+      - equal:
+          path: spec.template.spec.containers[0].env[2].name
+          value: LOG_FORMAT
+      - equal:
+          path: spec.template.spec.containers[0].env[2].value
+          value: "json"
 
   - it: fails the render when apiToken is absent
     set:
@@ -53,18 +230,20 @@ tests:
       - failedTemplate:
           errorMessage: apiToken is required
 
-  - it: sets the service account name when creation is enabled
+  - it: fails the render when adminEmail is absent
+    set:
+      adminEmail: null
     asserts:
-      - equal:
-          path: spec.template.spec.serviceAccountName
-          value: RELEASE-NAME-sample
+      - failedTemplate:
+          errorMessage: adminEmail is required
 
-  - it: omits the service account name when creation is disabled
+  - it: falls back to the cluster default service account when creation is disabled
     set:
       serviceAccount.create: false
     asserts:
-      - notExists:
+      - equal:
           path: spec.template.spec.serviceAccountName
+          value: default
 
   - it: honours an explicit service account name
     set:
@@ -74,12 +253,6 @@ tests:
           path: spec.template.spec.serviceAccountName
           value: custom-sa
 
-  - it: falls back to the chart appVersion when the image tag is empty
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: "nginx:1.16.0"
-
   - it: uses an explicit image tag when one is given
     set:
       image.tag: v9.9.9
@@ -88,22 +261,48 @@ tests:
           path: spec.template.spec.containers[0].image
           value: "nginx:v9.9.9"
 
+  - it: truncates a long name to 63 characters and trims the trailing dash
+    set:
+      nameOverride: an-application-name-long-enough-that-the-template-must-truncate-it
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-an-application-name-long-enough-that-the-template
+
+  - it: hands the replica count to the autoscaler when one is enabled
+    set:
+      autoscaling.enabled: true
+    asserts:
+      - notExists:
+          path: spec.replicas
+
   - it: adds the PRODUCTION env var only in prod
     set:
       env: prod
     asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 4
       - equal:
-          path: spec.template.spec.containers[0].env[1].name
+          path: spec.template.spec.containers[0].env[3].name
           value: PRODUCTION
       - equal:
-          path: spec.template.spec.containers[0].env[1].value
+          path: spec.template.spec.containers[0].env[3].value
           value: "true"
 
-  - it: omits the PRODUCTION env var outside prod
+  - it: adds the STAGING env var only in staging
+    set:
+      env: staging
     asserts:
       - lengthEqual:
           path: spec.template.spec.containers[0].env
-          count: 1
+          count: 4
+      - equal:
+          path: spec.template.spec.containers[0].env[3].name
+          value: STAGING
+      - equal:
+          path: spec.template.spec.containers[0].env[3].value
+          value: "true"
 ---
 suite: strong assertions on the service
 templates:
@@ -113,9 +312,26 @@ tests:
     asserts:
       - isKind:
           of: Service
+      - isAPIVersion:
+          of: v1
       - equal:
           path: metadata.name
           value: RELEASE-NAME-sample
+      - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
       - equal:
           path: spec.type
           value: ClusterIP
@@ -123,17 +339,49 @@ tests:
           path: spec.externalTrafficPolicy
           value: Cluster
       - equal:
+          path: spec.sessionAffinity
+          value: None
+      - lengthEqual:
+          path: spec.ports
+          count: 2
+      - equal:
           path: spec.ports[0].port
           value: 80
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
       - equal:
           path: spec.ports[0].protocol
           value: TCP
       - equal:
           path: spec.ports[0].name
           value: http
-      - lengthEqual:
-          path: spec.ports
-          count: 1
+      - equal:
+          path: spec.ports[1].port
+          value: 9090
+      - equal:
+          path: spec.ports[1].targetPort
+          value: metrics
+      - equal:
+          path: spec.ports[1].protocol
+          value: TCP
+      - equal:
+          path: spec.ports[1].name
+          value: metrics
+      - equal:
+          path: spec.selector['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: spec.selector['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+
+  - it: keeps the client source IP when the service is external
+    set:
+      service.external: true
+    asserts:
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Local
 
   - it: honours an overridden service type and port
     set:
@@ -146,6 +394,208 @@ tests:
       - equal:
           path: spec.ports[0].port
           value: 8080
+
+  - it: drops the metrics port when metrics are disabled
+    set:
+      metrics.enabled: false
+    asserts:
+      - lengthEqual:
+          path: spec.ports
+          count: 1
+---
+suite: strong assertions on the config map
+templates:
+  - configmap.yaml
+tests:
+  - it: pins every config entry
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - isAPIVersion:
+          of: v1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample-config
+      - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+      - equal:
+          path: data['log-level']
+          value: "info"
+      - equal:
+          path: data['log-format']
+          value: "json"
+      - equal:
+          path: data['max-connections']
+          value: "256"
+      - equal:
+          path: data['request-timeout-seconds']
+          value: "30"
+      - equal:
+          path: data['backoff-factor']
+          value: "1.5"
+      - equal:
+          path: data['trace-sample-ratio']
+          value: "0.1"
+      - equal:
+          path: data['cache-size-mb']
+          value: "64"
+      - equal:
+          path: data['cache-enabled']
+          value: "true"
+      - equal:
+          path: data['retry-policy']
+          value: "conservative"
+      - equal:
+          path: data['worker-count']
+          value: "1"
+      - equal:
+          path: data['shutdown-drain']
+          value: "true"
+      - equal:
+          path: data['metrics-path']
+          value: /metrics
+      - equal:
+          path: data['verbose-errors']
+          value: "true"
+      - equal:
+          path: data['profiling']
+          value: "true"
+
+  - it: honours an explicit log level
+    set:
+      config.logLevel: debug
+    asserts:
+      - equal:
+          path: data['log-level']
+          value: debug
+
+  - it: honours an explicit trace sample ratio
+    set:
+      config.traceSampleRatio: 0.5
+    asserts:
+      - equal:
+          path: data['trace-sample-ratio']
+          value: "0.5"
+
+  - it: turns the cache off below the size threshold
+    set:
+      config.cacheSizeMb: 16
+    asserts:
+      - equal:
+          path: data['cache-size-mb']
+          value: "16"
+      - equal:
+          path: data['cache-enabled']
+          value: "false"
+
+  - it: retries aggressively while the request timeout is short
+    set:
+      config.requestTimeoutSeconds: 10
+    asserts:
+      - equal:
+          path: data['request-timeout-seconds']
+          value: "10"
+      - equal:
+          path: data['retry-policy']
+          value: "aggressive"
+
+  - it: fans out to four workers just past the burst threshold
+    set:
+      config.maxConnections: 257
+    asserts:
+      - equal:
+          path: data['max-connections']
+          value: "257"
+      - equal:
+          path: data['worker-count']
+          value: "4"
+
+  - it: drops the debug-only entries in production
+    set:
+      env: prod
+    asserts:
+      - notExists:
+          path: data['verbose-errors']
+      - notExists:
+          path: data['profiling']
+
+  - it: keeps verbose errors outside dev when debug is on
+    set:
+      env: prod
+      config.debug: true
+    asserts:
+      - equal:
+          path: data['verbose-errors']
+          value: "true"
+
+  - it: drops profiling when metrics are disabled
+    set:
+      metrics.enabled: false
+    asserts:
+      - notExists:
+          path: data['profiling']
+---
+suite: strong assertions on the service account
+templates:
+  - serviceaccount.yaml
+tests:
+  - it: pins every service account field
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ServiceAccount
+      - isAPIVersion:
+          of: v1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+      - equal:
+          path: automountServiceAccountToken
+          value: true
+
+  - it: renders nothing when creation is disabled
+    set:
+      serviceAccount.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: honours an explicit service account name
+    set:
+      serviceAccount.name: custom-sa
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-sa
 ---
 suite: strong assertions on the ingress
 templates:
@@ -164,9 +614,34 @@ tests:
           count: 1
       - isKind:
           of: Ingress
+      - isAPIVersion:
+          of: networking.k8s.io/v1
       - equal:
           path: metadata.name
           value: RELEASE-NAME-sample
+      - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+      - equal:
+          path: metadata.annotations['nginx.ingress.kubernetes.io/rewrite-target']
+          value: /
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+      - notExists:
+          path: spec.tls
       - equal:
           path: spec.rules[0].host
           value: chart.example.com
@@ -177,5 +652,174 @@ tests:
           path: spec.rules[0].http.paths[0].pathType
           value: Prefix
       - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: RELEASE-NAME-sample
+      - equal:
           path: spec.rules[0].http.paths[0].backend.service.port.number
           value: 80
+
+  - it: fails the render when the ingress host is absent
+    set:
+      ingress.enabled: true
+      ingress.host: null
+    asserts:
+      - failedTemplate:
+          errorMessage: ingress.host is required when the ingress is enabled
+
+  - it: adds a tls block once tls is enabled
+    set:
+      ingress.enabled: true
+      ingress.tls.enabled: true
+    asserts:
+      - lengthEqual:
+          path: spec.tls
+          count: 1
+      - equal:
+          path: spec.tls[0].hosts[0]
+          value: chart.example.com
+      - equal:
+          path: spec.tls[0].secretName
+          value: sample-tls
+---
+suite: strong assertions on the autoscaler
+templates:
+  - hpa.yaml
+tests:
+  - it: renders nothing while autoscaling is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: pins every autoscaler field once enabled
+    set:
+      autoscaling.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: HorizontalPodAutoscaler
+      - isAPIVersion:
+          of: autoscaling/v2
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+      - equal:
+          path: spec.scaleTargetRef.apiVersion
+          value: apps/v1
+      - equal:
+          path: spec.scaleTargetRef.kind
+          value: Deployment
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: spec.minReplicas
+          value: 2
+      - equal:
+          path: spec.maxReplicas
+          value: 5
+      - lengthEqual:
+          path: spec.metrics
+          count: 1
+      - equal:
+          path: spec.metrics[0].type
+          value: Resource
+      - equal:
+          path: spec.metrics[0].resource.name
+          value: cpu
+      - equal:
+          path: spec.metrics[0].resource.target.type
+          value: Utilization
+      - equal:
+          path: spec.metrics[0].resource.target.averageUtilization
+          value: 80
+
+  - it: adds the memory metric once a memory target is set
+    set:
+      autoscaling.enabled: true
+      autoscaling.targetMemoryUtilizationPercentage: 70
+    asserts:
+      - lengthEqual:
+          path: spec.metrics
+          count: 2
+      - equal:
+          path: spec.metrics[1].type
+          value: Resource
+      - equal:
+          path: spec.metrics[1].resource.name
+          value: memory
+      - equal:
+          path: spec.metrics[1].resource.target.type
+          value: Utilization
+      - equal:
+          path: spec.metrics[1].resource.target.averageUtilization
+          value: 70
+---
+suite: strong assertions on the pod disruption budget
+templates:
+  - poddisruptionbudget.yaml
+tests:
+  - it: pins every budget field when more than one replica is asked for
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PodDisruptionBudget
+      - isAPIVersion:
+          of: policy/v1
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: metadata.labels['helm.sh/chart']
+          value: sample-0.1.0
+      - equal:
+          path: metadata.labels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels['app.kubernetes.io/version']
+          value: "1.16.0"
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+      - equal:
+          path: spec.minAvailable
+          value: 1
+      - equal:
+          path: spec.selector.matchLabels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: spec.selector.matchLabels['app.kubernetes.io/instance']
+          value: RELEASE-NAME
+
+  - it: renders nothing for a single replica, where a budget would block eviction
+    set:
+      replicaCount: 1
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing when the budget is disabled
+    set:
+      podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

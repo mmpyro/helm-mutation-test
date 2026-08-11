@@ -4,6 +4,10 @@
 # almost nothing about the chart's actual content: only that documents of the
 # right kind come out. This is the failure mode mutation testing exists to
 # expose, so this suite is expected to score LOW.
+#
+# It also declares only two of the chart's templates, so mutants in the other
+# five are reported as no-coverage rather than survived — a second kind of gap,
+# and the one the ingress mutants demonstrate.
 suite: weak assertions
 templates:
   - deployment.yaml
