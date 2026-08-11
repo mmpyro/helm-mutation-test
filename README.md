@@ -28,7 +28,7 @@ them as equally green:
 
 ```console
 $ helm unittest -f 'tests/weak_test.yaml'   testdata/charts/sample   # PASS, 4 tests
-$ helm unittest -f 'tests/strong_test.yaml' testdata/charts/sample   # PASS, 14 tests
+$ helm unittest -f 'tests/strong_test.yaml' testdata/charts/sample   # PASS, 43 tests
 ```
 
 Mutation testing separates them:
