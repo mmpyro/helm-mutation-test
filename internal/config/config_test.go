@@ -137,3 +137,12 @@ func TestNeedsReportDir(t *testing.T) {
 		t.Error("json output needs a report dir")
 	}
 }
+
+func TestEquivalenceCheckDefaultsOn(t *testing.T) {
+	// A survivor that no assertion could ever catch is a false positive, and on a
+	// well-tested chart it is most of the output. Detection is worth having by
+	// default; --no-equivalence-check is the escape hatch.
+	if !Defaults().EquivalenceCheck {
+		t.Fatal("EquivalenceCheck should default to true")
+	}
+}

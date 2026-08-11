@@ -57,8 +57,11 @@ type Config struct {
 	Exclude         []string
 	MaxMutants      int
 	Seed            int64
-	SkipEquivalent  bool
-	Timeout         time.Duration
+	// EquivalenceCheck re-renders each survivor to find mutations that cannot
+	// change any manifest. They are reported as Equivalent and left out of the
+	// score, which they would otherwise depress by an amount no test can fix.
+	EquivalenceCheck bool
+	Timeout          time.Duration
 
 	// Execution.
 	Parallel        int
@@ -93,14 +96,15 @@ func (c *Config) NeedsReportDir() bool {
 // Defaults returns a Config with every default applied except ChartPath.
 func Defaults() Config {
 	return Config{
-		TestFiles:       []string{"tests/*_test.yaml"},
-		WithSubChart:    true,
-		Include:         slices.Clone(DefaultIncludes),
-		Seed:            1,
-		Parallel:        runtime.NumCPU(),
-		KillAttribution: AttributionFirst,
-		Reports:         []ReportFormat{ReportConsole},
-		ReportDir:       ".helm-mutation-test",
+		TestFiles:        []string{"tests/*_test.yaml"},
+		WithSubChart:     true,
+		Include:          slices.Clone(DefaultIncludes),
+		Seed:             1,
+		EquivalenceCheck: true,
+		Parallel:         runtime.NumCPU(),
+		KillAttribution:  AttributionFirst,
+		Reports:          []ReportFormat{ReportConsole},
+		ReportDir:        ".helm-mutation-test",
 	}
 }
 

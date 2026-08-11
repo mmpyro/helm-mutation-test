@@ -67,9 +67,10 @@ func (e *codedError) Unwrap() error { return e.err }
 func newRootCmd() *cobra.Command {
 	cfg := config.Defaults()
 	var (
-		reports  []string
-		colour   bool
-		noColour bool
+		reports            []string
+		colour             bool
+		noColour           bool
+		noEquivalenceCheck bool
 	)
 
 	cmd := &cobra.Command{
@@ -108,6 +109,7 @@ Examples:
 			cfg.ChartPath = args[0]
 			cfg.Reports = parseReports(reports)
 			cfg.Color = resolveColour(colour, noColour)
+			cfg.EquivalenceCheck = !noEquivalenceCheck
 
 			if err := cfg.Validate(mutator.IDs()); err != nil {
 				return &codedError{exitCannotRun, err}
@@ -139,6 +141,11 @@ Examples:
 	f.IntVar(&cfg.MaxMutants, "max-mutants", 0,
 		"evaluate at most this many mutants, sampled deterministically (0 = no limit)")
 	f.Int64Var(&cfg.Seed, "seed", cfg.Seed, "sampling seed, for a reproducible --max-mutants subset")
+	// pflag has no native negated bool, so bind the negation and invert it after
+	// parsing. Keep backticks out of the usage string: pflag's UnquoteUsage turns
+	// the first backquoted run into the flag's displayed value type.
+	f.BoolVar(&noEquivalenceCheck, "no-equivalence-check", false,
+		"skip the post-pass that identifies survivors no assertion could ever catch")
 	f.DurationVar(&cfg.Timeout, "timeout", 0,
 		"per-mutant timeout (default: 10x the baseline run, at least 30s)")
 
