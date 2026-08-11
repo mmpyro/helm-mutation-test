@@ -14,7 +14,8 @@ import (
 	"github.com/mmpyro/helm-mutation-test/internal/model"
 )
 
-// sampleRun covers every status so each format is exercised on all of them.
+// sampleRun covers every status — Killed, Survived, NoCoverage, Invalid,
+// Equivalent, Timeout and Error — so each format is exercised on all of them.
 func sampleRun() *model.Run {
 	run := &model.Run{
 		ChartName: "sample",
@@ -62,6 +63,16 @@ func sampleRun() *model.Run {
 				Duration: 3 * time.Millisecond,
 			},
 			{
+				ID: "deployment.yaml:250:num-literal:equiv", Mutator: "num-literal",
+				File: "templates/deployment.yaml", Line: 11, Column: 30,
+				StartByte: 250, EndByte: 252,
+				Original: "80", Mutated: "0",
+				OriginalLine: "        - containerPort: 80",
+				MutatedLine:  "        - containerPort: 0",
+				Status:       model.StatusEquivalent,
+				Detail:       "identical across all render contexts; span proven executed",
+			},
+			{
 				ID: "ingress.yaml:10:num-literal:zero", Mutator: "num-literal",
 				File: "templates/ingress.yaml", Line: 3, Column: 5,
 				StartByte: 10, EndByte: 12,
@@ -100,6 +111,15 @@ func sampleRun() *model.Run {
 	return run
 }
 
+// allFormatsChartDir is a fixed stand-in chart directory for allFormats' HTML
+// render. It deliberately does NOT come from t.TempDir(): that path embeds the
+// calling test's name (e.g. "TestEveryFormatNamesEquivalentMutants"), which
+// Stryker echoes verbatim into the report's projectRoot field — letting a test
+// named after the very word it is asserting on pass regardless of what the
+// production code does. The directory need not exist; a missing chart source
+// is tolerated (see TestStrykerToleratesUnreadableSource).
+const allFormatsChartDir = "testdata/allformats-fixture"
+
 // allFormats renders run through every one of the five report formats, so a
 // property that must hold across all of them can be checked in one loop
 // instead of five near-identical tests.
@@ -131,7 +151,7 @@ func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 	}
 	out = append(out, struct{ name, output string }{"junit", string(ju)})
 
-	html, err := HTML(run, t.TempDir())
+	html, err := HTML(run, allFormatsChartDir)
 	if err != nil {
 		t.Fatalf("HTML: %v", err)
 	}
@@ -221,8 +241,9 @@ func TestConsoleExplainsEverythingExcludedFromTheScore(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"not scored:", "1 no-coverage", "1 invalid", "1 timeout", "1 error",
+		"not scored:", "1 no-coverage", "1 equivalent", "1 invalid", "1 timeout", "1 error",
 		"NO COVERAGE (1)", "no suite renders this template",
+		"Equivalent", "cannot change any rendered manifest; not scored",
 		"INVALID (1)", "excluded from the score",
 		"PARTIALLY ANALYSED (1)",
 	} {
@@ -326,7 +347,7 @@ func TestJSONRoundTripsAndCarriesEverything(t *testing.T) {
 	for _, key := range []string{
 		"schema", "chartName", "score", "threshold", "passed", "tally",
 		"generated", "capped", "mutators", "suites", "byMutator", "byFile",
-		"mutants", "skippedFiles", "timing",
+		"mutants", "skippedFiles", "timing", "equivalenceChecked",
 	} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("JSON report is missing %q", key)
@@ -339,8 +360,8 @@ func TestJSONRoundTripsAndCarriesEverything(t *testing.T) {
 		t.Error("passed should be false at 50%% against an 80%% threshold")
 	}
 	mutants := got["mutants"].([]any)
-	if len(mutants) != 6 {
-		t.Fatalf("got %d mutants, want 6", len(mutants))
+	if len(mutants) != 7 {
+		t.Fatalf("got %d mutants, want 7", len(mutants))
 	}
 }
 
@@ -402,8 +423,9 @@ func TestMarkdownSummary(t *testing.T) {
 		"```diff",
 		"templates/deployment.yaml:7",
 		"### Templates no suite renders",
-		"`--max-mutants` ran 6 of 9",
+		"`--max-mutants` ran 7 of 9",
 		"### Partially analysed",
+		"| Equivalent | 1 |",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("markdown is missing %q\n%s", want, out)
@@ -480,17 +502,17 @@ func TestJUnitMapsSurvivedToFailure(t *testing.T) {
 		t.Fatalf("invalid XML: %v\n%s", err, b)
 	}
 
-	// 6 mutants + the --max-mutants notice, which sampleRun triggers with Capped: 2.
-	if suites.Tests != 7 {
-		t.Errorf("tests = %d, want 7", suites.Tests)
+	// 7 mutants + the --max-mutants notice, which sampleRun triggers with Capped: 2.
+	if suites.Tests != 8 {
+		t.Errorf("tests = %d, want 8", suites.Tests)
 	}
 	if suites.Failures != 1 {
 		t.Errorf("failures = %d, want 1 (only the survivor)", suites.Failures)
 	}
-	// NoCoverage, Invalid, Timeout and Error all skip: none grades assertions.
-	// Plus the --max-mutants notice, which also reports as a skip.
-	if suites.Skipped != 5 {
-		t.Errorf("skipped = %d, want 5", suites.Skipped)
+	// NoCoverage, Invalid, Equivalent, Timeout and Error all skip: none grades
+	// assertions. Plus the --max-mutants notice, which also reports as a skip.
+	if suites.Skipped != 6 {
+		t.Errorf("skipped = %d, want 6", suites.Skipped)
 	}
 
 	var sawFailure, sawKilledAsPass bool
@@ -565,12 +587,51 @@ func TestJUnitOmitsTheCapNoticeWhenNothingWasDropped(t *testing.T) {
 	}
 }
 
+// TestJUnitNamesTheSkippedEquivalenceCheck mirrors TestJUnitNamesTheCap: a
+// skipped equivalence pass must be visible in the XML itself, not just
+// implied by an equivalent count of zero, or a CI UI fed only this report
+// would read "never checked" as "checked, found none".
+func TestJUnitNamesTheSkippedEquivalenceCheck(t *testing.T) {
+	run := sampleRun()
+	run.EquivalenceChecked = false
+	b, err := JUnit(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `name="--no-equivalence-check"`) {
+		t.Errorf("no --no-equivalence-check testsuite in:\n%s", got)
+	}
+	if !strings.Contains(got, "equivalence check did not run") {
+		t.Errorf("notice does not say the check was skipped:\n%s", got)
+	}
+}
+
+// TestJUnitOmitsTheEquivalenceNoticeWhenTheCheckRan mirrors
+// TestJUnitOmitsTheCapNoticeWhenNothingWasDropped: a run where the check did
+// happen should not carry a notice that would only ever say "skipped".
+func TestJUnitOmitsTheEquivalenceNoticeWhenTheCheckRan(t *testing.T) {
+	run := sampleRun() // EquivalenceChecked: true
+	b, err := JUnit(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "--no-equivalence-check") {
+		t.Errorf("a checked run should not mention --no-equivalence-check:\n%s", b)
+	}
+}
+
 func TestSkipReasonExplainsEachStatus(t *testing.T) {
 	tests := []struct {
 		status model.Status
 		want   string
 	}{
 		{model.StatusNoCoverage, "no suite renders"},
+		// Pinned on the explanatory sentence, not the bare word "Equivalent": the
+		// default branch also happens to emit that word (it falls back to
+		// string(m.Status)), so a substring check alone would pass even with the
+		// dedicated case deleted.
+		{model.StatusEquivalent, "no assertion could catch it"},
 		{model.StatusInvalid, "stopped the chart rendering"},
 		{model.StatusTimeout, "timed out"},
 		{model.StatusError, "the tool failed"},
@@ -657,6 +718,8 @@ func TestStrykerStatusMapping(t *testing.T) {
 		{model.StatusNoCoverage, "NoCoverage"},
 		// The schema's term for "the mutation made the artefact unbuildable".
 		{model.StatusInvalid, "CompileError"},
+		// The schema's term for a mutant deliberately excluded from scoring.
+		{model.StatusEquivalent, "Ignored"},
 		{model.StatusTimeout, "Timeout"},
 		{model.StatusError, "RuntimeError"},
 	}
