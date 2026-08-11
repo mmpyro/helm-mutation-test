@@ -65,7 +65,8 @@ const strykerSchemaURL = "https://raw.githubusercontent.com/stryker-mutator/muta
 //
 // Invalid becomes CompileError, which is the schema's term for "the mutation made
 // the artefact unbuildable": exactly our case, and like us the viewer excludes it
-// from the score.
+// from the score. Equivalent becomes Ignored, the schema's term for a mutant
+// deliberately excluded from scoring — again matching our semantics exactly.
 func strykerStatus(s model.Status) string {
 	switch s {
 	case model.StatusKilled:
@@ -76,6 +77,8 @@ func strykerStatus(s model.Status) string {
 		return "NoCoverage"
 	case model.StatusInvalid:
 		return "CompileError"
+	case model.StatusEquivalent:
+		return "Ignored"
 	case model.StatusTimeout:
 		return "Timeout"
 	default:
@@ -101,6 +104,8 @@ func describeMutant(m model.Mutant) string {
 		return fmt.Sprintf("%s: no test noticed this change", m.Mutator)
 	case model.StatusNoCoverage:
 		return fmt.Sprintf("%s: no suite renders this template", m.Mutator)
+	case model.StatusEquivalent:
+		return fmt.Sprintf("%s: %s", m.Mutator, "cannot change any rendered manifest")
 	default:
 		return m.Mutator
 	}

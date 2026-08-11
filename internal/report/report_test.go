@@ -23,12 +23,13 @@ func sampleRun() *model.Run {
 		Suites: []model.SuiteInfo{
 			{Name: "weak assertions", File: "tests/weak_test.yaml", Tests: []string{"renders a Deployment"}},
 		},
-		TestCount:        4,
-		Generated:        9,
-		Capped:           2,
-		BaselineDuration: 5 * time.Millisecond,
-		Duration:         320 * time.Millisecond,
-		Threshold:        80,
+		TestCount:          4,
+		Generated:          9,
+		Capped:             2,
+		EquivalenceChecked: true,
+		BaselineDuration:   5 * time.Millisecond,
+		Duration:           320 * time.Millisecond,
+		Threshold:          80,
 		SkippedFiles: []model.SkippedFile{
 			{File: "templates/exotic.yaml", Reason: "template did not parse: unexpected {{end}}\nsecond line"},
 		},
@@ -97,6 +98,90 @@ func sampleRun() *model.Run {
 	}
 	run.ComputeTally()
 	return run
+}
+
+// allFormats renders run through every one of the five report formats, so a
+// property that must hold across all of them can be checked in one loop
+// instead of five near-identical tests.
+func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
+	t.Helper()
+	var out []struct{ name, output string }
+
+	var console bytes.Buffer
+	if err := Console(&console, run, false); err != nil {
+		t.Fatalf("Console: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"console", console.String()})
+
+	j, err := JSON(run)
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"json", string(j)})
+
+	md, err := Markdown(run)
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"markdown", string(md)})
+
+	ju, err := JUnit(run)
+	if err != nil {
+		t.Fatalf("JUnit: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"junit", string(ju)})
+
+	html, err := HTML(run, t.TempDir())
+	if err != nil {
+		t.Fatalf("HTML: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"html", string(html)})
+
+	return out
+}
+
+// ---------- equivalent (cross-format) ----------
+
+func TestEveryFormatNamesEquivalentMutants(t *testing.T) {
+	// An exclusion no format mentions reads as full coverage to anyone looking at
+	// that format. Equivalent joins no-coverage and invalid in all five.
+	run := &model.Run{
+		ChartName:          "sample",
+		EquivalenceChecked: true,
+		Mutants: []model.Mutant{
+			{ID: "1", Mutator: "num-literal", File: "templates/a.yaml", Line: 3, Column: 5,
+				Status: model.StatusKilled},
+			{ID: "2", Mutator: "num-literal", File: "templates/a.yaml", Line: 7, Column: 9,
+				Original: "nindent 4", Mutated: "nindent 5", Status: model.StatusEquivalent,
+				Detail: "identical under 12 test-job value sets; span proven executed"},
+		},
+	}
+	run.ComputeTally()
+
+	for _, tc := range allFormats(t, run) {
+		if !strings.Contains(strings.ToLower(tc.output), "equivalent") {
+			t.Errorf("%s does not name equivalent mutants:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
+func TestEveryFormatSaysWhenEquivalenceWasNotChecked(t *testing.T) {
+	// "equivalent 0" with the check disabled would read as "checked, found none".
+	run := &model.Run{
+		ChartName:          "sample",
+		EquivalenceChecked: false,
+		Mutants: []model.Mutant{
+			{ID: "1", Mutator: "num-literal", File: "templates/a.yaml", Line: 3, Column: 5,
+				Status: model.StatusSurvived},
+		},
+	}
+	run.ComputeTally()
+
+	for _, tc := range allFormats(t, run) {
+		if !strings.Contains(strings.ToLower(tc.output), "equivalence") {
+			t.Errorf("%s does not say the equivalence check was skipped:\n%s", tc.name, tc.output)
+		}
+	}
 }
 
 // ---------- console ----------

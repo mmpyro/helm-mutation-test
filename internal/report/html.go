@@ -77,6 +77,7 @@ func summaryTable(run *model.Run) string {
 		{"Killed", "a test caught the mutation", run.Tally.Killed, "killed"},
 		{"Survived", "no test noticed — a missing assertion", run.Tally.Survived, "survived"},
 		{"No coverage", "no suite renders the mutated template", run.Tally.NoCoverage, "muted"},
+		{"Equivalent", "cannot change any rendered manifest — unkillable", run.Tally.Equivalent, "muted"},
 		{"Invalid", "broke rendering, so it grades nothing", run.Tally.Invalid, "muted"},
 		{"Timeout", "exceeded the per-mutant timeout", run.Tally.Timeout, "muted"},
 		{"Error", "the tool itself failed", run.Tally.Errored, "muted"},
@@ -90,6 +91,10 @@ func summaryTable(run *model.Run) string {
 	}
 	fmt.Fprintf(b, `<tr class="total"><th>Scored</th><td>%d</td><td>of %d mutants; only killed and survived count</td></tr>`,
 		run.Tally.Scored(), run.Tally.Total())
+	if !run.EquivalenceChecked {
+		fmt.Fprint(b, `<tr class="warn"><th>Equivalence</th><td>-</td>`+
+			`<td>check skipped (--no-equivalence-check); some survivors may be unkillable</td></tr>`)
+	}
 	if run.Capped > 0 {
 		fmt.Fprintf(b, `<tr class="warn"><th>Not evaluated</th><td>%d</td><td>--max-mutants ran %d of %d generated</td></tr>`,
 			run.Capped, len(run.Mutants), run.Generated)

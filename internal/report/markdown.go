@@ -36,6 +36,7 @@ func Markdown(run *model.Run) ([]byte, error) {
 		{"Killed", "a test caught the mutation", run.Tally.Killed},
 		{"Survived", "**no test noticed** — a missing assertion", run.Tally.Survived},
 		{"No coverage", "no suite renders the mutated template", run.Tally.NoCoverage},
+		{"Equivalent", "cannot change any rendered manifest — unkillable", run.Tally.Equivalent},
 		{"Invalid", "broke rendering, so it grades nothing", run.Tally.Invalid},
 		{"Timeout", "exceeded the per-mutant timeout", run.Tally.Timeout},
 		{"Error", "the tool itself failed", run.Tally.Errored},
@@ -48,6 +49,11 @@ func Markdown(run *model.Run) ([]byte, error) {
 	}
 	fmt.Fprintf(b, "\nScore counts only killed and survived mutants: %d of %d.\n\n",
 		run.Tally.Scored(), run.Tally.Total())
+
+	if !run.EquivalenceChecked {
+		b.WriteString("> The equivalence check was skipped (`--no-equivalence-check`); " +
+			"some survivors may be unkillable.\n\n")
+	}
 
 	if run.Capped > 0 {
 		fmt.Fprintf(b, "> ⚠️ `--max-mutants` ran %d of %d generated mutants; %d were not evaluated.\n\n",

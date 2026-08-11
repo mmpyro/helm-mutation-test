@@ -32,6 +32,7 @@ func Console(w io.Writer, run *model.Run, colour bool) error {
 	writeBreakdowns(b, run, c)
 	writeSurvivors(b, run, c)
 	writeNoCoverage(b, run, c)
+	writeEquivalent(b, run, c)
 	writeInvalid(b, run, c)
 	writeSkippedFiles(b, run, c)
 	writeFooter(b, run, c)
@@ -53,6 +54,9 @@ func writeScore(b *strings.Builder, run *model.Run, c colours) {
 	if run.Tally.NoCoverage > 0 {
 		excluded = append(excluded, fmt.Sprintf("%d no-coverage", run.Tally.NoCoverage))
 	}
+	if run.Tally.Equivalent > 0 {
+		excluded = append(excluded, fmt.Sprintf("%d equivalent", run.Tally.Equivalent))
+	}
 	if run.Tally.Invalid > 0 {
 		excluded = append(excluded, fmt.Sprintf("%d invalid", run.Tally.Invalid))
 	}
@@ -64,6 +68,10 @@ func writeScore(b *strings.Builder, run *model.Run, c colours) {
 	}
 	if len(excluded) > 0 {
 		fmt.Fprintf(b, "  %s\n", c.faint("not scored: "+strings.Join(excluded, " · ")))
+	}
+	if !run.EquivalenceChecked {
+		fmt.Fprintf(b, "  %s\n", c.faint(
+			"equivalence check skipped (--no-equivalence-check): some survivors may be unkillable"))
 	}
 	if run.Capped > 0 {
 		// Never let a truncated run read as full coverage.
@@ -191,6 +199,22 @@ func writeNoCoverage(b *strings.Builder, run *model.Run, c colours) {
 	for _, f := range files {
 		fmt.Fprintf(b, "    %s %s\n", f,
 			c.faint(fmt.Sprintf("— no suite renders this template (%d mutants never run)", counts[f])))
+	}
+	b.WriteString("\n")
+}
+
+// writeEquivalent lists mutants no assertion could ever catch. They are not
+// work items, so they are shown compactly — the point is to account for them,
+// not to send anyone chasing them.
+func writeEquivalent(b *strings.Builder, run *model.Run, c colours) {
+	eq := run.Equivalent()
+	if len(eq) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "  %s  %s\n", c.bold("Equivalent"),
+		c.faint("cannot change any rendered manifest; not scored"))
+	for _, m := range eq {
+		fmt.Fprintf(b, "    %s:%d:%d  %s\n", m.File, m.Line, m.Column, c.faint(m.Mutator))
 	}
 	b.WriteString("\n")
 }

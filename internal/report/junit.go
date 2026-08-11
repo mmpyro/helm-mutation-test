@@ -16,8 +16,9 @@ import (
 //   - Survived becomes a <failure>. A survivor is the actionable defect, so it is
 //     what should turn a CI job red.
 //   - Killed becomes a passing case: the tests did their job.
-//   - NoCoverage, Invalid, Timeout and Error become <skipped>, because none of
-//     them says anything about assertion quality and none should fail a build.
+//   - NoCoverage, Invalid, Equivalent, Timeout and Error become <skipped>, because
+//     none of them says anything about assertion quality and none should fail a
+//     build.
 func JUnit(run *model.Run) ([]byte, error) {
 	byFile := map[string][]model.Mutant{}
 	var files []string
@@ -72,6 +73,13 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Tests++
 		suites.Skipped++
 	}
+	// A skipped equivalence check must be visible too, or "equivalent 0" in the
+	// tally reads as "checked, found none" rather than "never looked".
+	if !run.EquivalenceChecked {
+		suites.Suites = append([]junitSuite{equivalenceCheckSkippedNotice()}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
 
 	suites.Time = fmt.Sprintf("%.4f", run.Duration.Seconds())
 
@@ -100,6 +108,8 @@ func skipReason(m model.Mutant) string {
 	switch m.Status {
 	case model.StatusNoCoverage:
 		return fmt.Sprintf("no suite renders %s, so this mutation was never run", m.File)
+	case model.StatusEquivalent:
+		return "equivalent: the mutation cannot change any rendered manifest, so no assertion could catch it"
 	case model.StatusInvalid:
 		return "the mutation stopped the chart rendering, so it grades nothing: " + firstLine(m.Detail)
 	case model.StatusTimeout:
@@ -133,6 +143,26 @@ func cappedNotice(run *model.Run) junitSuite {
 				"%d of %d generated mutants were not evaluated (--max-mutants); "+
 					"this run is a sample, not full coverage",
 				run.Capped, run.Generated)},
+		}},
+	}
+}
+
+// equivalenceCheckSkippedNotice makes a skipped equivalence pass visible in the
+// XML, the same way cappedNotice does for --max-mutants: without it, a CI UI
+// showing only this report has no way to tell "0 equivalent because none exist"
+// from "0 equivalent because nobody checked".
+func equivalenceCheckSkippedNotice() junitSuite {
+	return junitSuite{
+		Name:     "--no-equivalence-check",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      "equivalence check skipped",
+			ClassName: "--no-equivalence-check",
+			Time:      "0.0000",
+			Skipped: &junitSkipped{Message: "the equivalence check did not run " +
+				"(--no-equivalence-check); some survivors may be unkillable"},
 		}},
 	}
 }
