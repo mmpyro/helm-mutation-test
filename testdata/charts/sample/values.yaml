@@ -1,0 +1,25 @@
+replicaCount: 2
+
+image:
+  repository: nginx
+  # tag is intentionally empty so the `| default .Chart.AppVersion` path matters
+  tag: ""
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  external: false
+
+ingress:
+  enabled: false
+  host: chart.example.com
+
+env: dev
+
+# Consumed via `required`, so a missing value must fail the render
+apiToken: fixture-token

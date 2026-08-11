@@ -13,16 +13,6 @@ func init() { register(strLiteral{}) }
 // debugging, its origin is obvious.
 const Sentinel = "helm-mutation-test"
 
-// strLiteralSkipKeys are fields whose value must not be replaced with a sentinel.
-//
-// apiVersion is the only genuine exclusion: a bogus apiVersion makes Helm fail to
-// parse the manifest, so every test dies on a render error and the mutant is
-// Invalid — noise, not signal. `kind` is deliberately NOT excluded: mutating it
-// keeps the YAML valid and is precisely what an `isKind` assertion should catch.
-var strLiteralSkipKeys = map[string]bool{
-	"apiVersion": true,
-}
-
 // strLiteral replaces string literals with a sentinel value.
 //
 // This is the mutator that punishes presence-only assertions. A suite asserting
@@ -49,9 +39,14 @@ func strLiteralTemplateAST(f *source.File) []Candidate {
 		return nil
 	}
 
-	// A string that is an argument to `include` or `template` names another
-	// template. Replacing it turns the call into a lookup of a template that does
-	// not exist, which is a render error rather than a missing assertion.
+	// A string argument to include/template/tpl names another template. Replacing
+	// it makes the call look up a template that does not exist, which is a render
+	// error: measured against the fixture chart it is killed by every suite alike,
+	// so it grades nothing and only adds Invalid noise to the report.
+	//
+	// This is the only exclusion here that evidence supports. A `required` message
+	// is NOT excluded — mutating it survives a weak suite and is caught by a suite
+	// that asserts the message via failedTemplate, which is a real finding.
 	guarded := map[int]bool{}
 	tree.Walk(func(n parse.Node) bool {
 		cmd, ok := n.(*parse.CommandNode)
@@ -69,14 +64,6 @@ func strLiteralTemplateAST(f *source.File) []Candidate {
 					guarded[int(s.Position())] = true
 				}
 			}
-		case "required":
-			// The first argument is the error message, not chart output. Mutating
-			// it changes nothing observable, so it can only ever survive.
-			if len(cmd.Args) > 1 {
-				if s, ok := cmd.Args[1].(*parse.StringNode); ok {
-					guarded[int(s.Position())] = true
-				}
-			}
 		}
 		return true
 	})
@@ -91,7 +78,10 @@ func strLiteralTemplateAST(f *source.File) []Candidate {
 		if !ok || guarded[start] || s.Text == Sentinel {
 			return true
 		}
-		// A format string is structure, not data.
+		// A format string carries printf verbs. Swapping in a sentinel with no
+		// verbs leaves the arguments unconsumed, so Go emits "%!(EXTRA ...)" into
+		// the manifest: a confusing artifact rather than a clean mutation. Skipped
+		// as a scoping choice for this iteration, not because it breaks rendering.
 		if isFormatString(s.Text) {
 			return true
 		}
@@ -107,7 +97,7 @@ func strLiteralTemplateAST(f *source.File) []Candidate {
 func strLiteralTemplateLiterals(f *source.File) []Candidate {
 	var out []Candidate
 	for _, v := range source.PlainYAMLValues(f) {
-		if v.Tag != source.TagStr || strLiteralSkipKeys[v.Key] {
+		if v.Tag != source.TagStr {
 			continue
 		}
 		inner, quote := source.Unquote(v.Value)
@@ -130,9 +120,6 @@ func strLiteralValues(f *source.File) []Candidate {
 	var out []Candidate
 	for _, s := range scalars {
 		if s.IsKey || s.Tag != "!!str" || s.Value == Sentinel {
-			continue
-		}
-		if strLiteralSkipKeys[lastPathSegment(s.Path)] {
 			continue
 		}
 		_, quote := source.Unquote(f.Slice(s.Start, s.End))

@@ -9,19 +9,15 @@ import (
 
 func init() { register(yamlKeyDelete{}) }
 
-// keyDeleteSkipKeys are keys whose removal breaks the manifest rather than
-// revealing a missing assertion.
+// No key is exempt from deletion.
 //
-// Deleting apiVersion, kind or metadata.name makes Helm reject the document
-// outright, so every test fails on a render error: an Invalid mutant, which is
-// noise. Everything else is fair game — deleting a field and having the suite
-// stay green is exactly the finding we want.
-var keyDeleteSkipKeys = map[string]bool{
-	"apiVersion": true,
-	"kind":       true,
-	"metadata":   true,
-}
-
+// apiVersion, kind and metadata were originally skipped on the assumption that
+// Helm rejects a manifest without them. Measuring against the fixture chart
+// disproved that: all three render fine when removed, survive the weak suite and
+// are caught by the strong one. Deleting `kind` is caught even by the weak suite,
+// because that is precisely what its `isKind` assertion is for — the tool working
+// as intended, not noise.
+//
 // A "key:" at the start of a line, with or without an inline value.
 var keyLine = regexp.MustCompile(`^(\s*)(?:-\s+)?([A-Za-z_][A-Za-z0-9_.\-/]*)[ \t]*:(\s|$)`)
 
@@ -53,9 +49,6 @@ func keyDeleteValues(f *source.File) []Candidate {
 	}
 	var out []Candidate
 	for _, b := range blocks {
-		if keyDeleteSkipKeys[b.Name] {
-			continue
-		}
 		out = append(out, Candidate{
 			Mutator: IDYAMLKeyDelete, Start: b.Start, End: b.End, Replacement: "",
 		})
@@ -79,10 +72,6 @@ func keyDeleteTemplate(f *source.File) []Candidate {
 		}
 		m := keyLine.FindStringSubmatch(text)
 		if m == nil {
-			continue
-		}
-		key := m[2]
-		if keyDeleteSkipKeys[key] {
 			continue
 		}
 		if hasControlFlow(text) {

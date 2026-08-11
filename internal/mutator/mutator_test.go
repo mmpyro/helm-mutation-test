@@ -451,35 +451,21 @@ func TestNumLiteralProducesTwoVariants(t *testing.T) {
 	}
 }
 
-// TestNumLiteralSkipsLayoutArguments is the guard that keeps the Invalid rate
-// down: changing a nindent width reindents the YAML and breaks rendering, which
-// every test "kills" while telling us nothing.
-func TestNumLiteralSkipsLayoutArguments(t *testing.T) {
+// TestNumLiteralMutatesLayoutArguments documents a corrected assumption. These
+// were once skipped on the theory that reindenting breaks rendering and yields
+// useless Invalid mutants. Measured against the fixture chart, `nindent 4 -> 0`
+// and `-> 99` both render, survive the weak suite and are caught by the strong
+// one, so they are exactly the signal this tool exists to surface.
+func TestNumLiteralMutatesLayoutArguments(t *testing.T) {
 	for _, src := range []string{
 		`x: {{ toYaml .Values.a | nindent 4 }}`,
 		`x: {{ toYaml .Values.a | indent 8 }}`,
 		`x: {{ .Values.a | trunc 63 }}`,
-		`x: {{ repeat 3 "ab" }}`,
-		`x: {{ printf "%s" .Values.a | trunc 63 }}`,
 		`x: {{ .Values.a | substr 0 5 }}`,
 	} {
-		if got := mustRun(t, IDNumLiteral, tmpl(src)); len(got) != 0 {
-			t.Errorf("%s: layout argument was mutated (%d candidates)", src, len(got))
+		if got := mustRun(t, IDNumLiteral, tmpl(src)); len(got) == 0 {
+			t.Errorf("%s: expected the numeric argument to be mutated", src)
 		}
-	}
-}
-
-func TestNumLiteralMutatesDataArgsAlongsideLayoutArgs(t *testing.T) {
-	// The 3 is data; the 4 is layout. Only the 3 may be mutated.
-	f := tmpl(`x: {{ .Values.r | default 3 }}` + "\n" + `y: {{ toYaml .Values.m | nindent 4 }}`)
-	got := mustRun(t, IDNumLiteral, f)
-	for _, c := range got {
-		if s := f.Slice(c.Start, c.End); s != "3" {
-			t.Errorf("mutated %q, expected only the data literal 3", s)
-		}
-	}
-	if len(got) != 2 {
-		t.Errorf("got %d candidates, want 2 variants of the literal 3", len(got))
 	}
 }
 
@@ -566,11 +552,9 @@ func TestStrLiteralGuards(t *testing.T) {
 		src  string
 		why  string
 	}{
-		{"apiVersion", "apiVersion: apps/v1\n", "a bogus apiVersion is a render error, not a missing assertion"},
-		{"include target", `x: {{ include "chart.fullname" . }}`, "renaming a template makes the lookup fail"},
+		{"include target", `x: {{ include "chart.fullname" . }}`, "renaming a template is a render error, killed by every suite alike"},
 		{"template target", `{{ template "chart.labels" . }}`, "same as include"},
-		{"required message", `x: {{ required "must be set" .Values.a }}`, "the message is not chart output"},
-		{"format string", `x: {{ printf "%s-%s" .a .b }}`, "a format string is structure, not data"},
+		{"format string", `x: {{ printf "%s-%s" .a .b }}`, "a verb-less sentinel leaves args unconsumed, emitting %!(EXTRA ...)"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -582,12 +566,24 @@ func TestStrLiteralGuards(t *testing.T) {
 	}
 }
 
-func TestStrLiteralMutatesKindDeliberately(t *testing.T) {
-	// kind is NOT guarded: mutating it keeps the YAML valid and is exactly what an
-	// isKind assertion should catch.
-	f := tmpl("kind: Deployment\n")
+// TestStrLiteralMutatesStructuralFields pins the corrected behaviour: kind and
+// apiVersion are both mutable. Measurement showed a mutated apiVersion renders
+// fine, survives the weak suite and is caught by the strong one, so excluding it
+// was discarding a real finding.
+func TestStrLiteralMutatesStructuralFields(t *testing.T) {
+	for _, src := range []string{"kind: Deployment\n", "apiVersion: apps/v1\n"} {
+		if got := mustRun(t, IDStrLiteral, tmpl(src)); len(got) != 1 {
+			t.Errorf("%q should yield 1 candidate, got %d", src, len(got))
+		}
+	}
+}
+
+// TestStrLiteralMutatesRequiredMessage: a suite asserting failedTemplate's
+// errorMessage catches this, a weak suite does not. That is a real finding.
+func TestStrLiteralMutatesRequiredMessage(t *testing.T) {
+	f := tmpl(`x: {{ required "must be set" .Values.a }}`)
 	if got := mustRun(t, IDStrLiteral, f); len(got) != 1 {
-		t.Fatalf("kind should be mutable, got %d candidates", len(got))
+		t.Fatalf("the required message should be mutable, got %d candidates", len(got))
 	}
 }
 
@@ -641,27 +637,23 @@ func TestYAMLKeyDeleteInTemplates(t *testing.T) {
 	}
 }
 
-// TestYAMLKeyDeleteGuards covers the exclusions that keep mutants valid.
-func TestYAMLKeyDeleteGuards(t *testing.T) {
-	tests := []struct {
-		name string
-		src  string
-		gone string
-		why  string
-	}{
-		{"apiVersion", "apiVersion: apps/v1\nkind: Deployment\n", "apiVersion", "Helm rejects a manifest without it"},
-		{"kind", "apiVersion: v1\nkind: Service\n", "kind", "same"},
-		{"metadata", "metadata:\n  name: x\n", "metadata", "same"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			f := tmpl(tc.src)
-			for _, s := range spans(f, mustRun(t, IDYAMLKeyDelete, f)) {
-				if strings.HasPrefix(strings.TrimSpace(s), tc.gone+":") {
-					t.Errorf("%s should be skipped (%s), but a candidate deletes %q", tc.gone, tc.why, s)
-				}
+// TestYAMLKeyDeleteHasNoKeyExemptions pins another corrected assumption.
+// apiVersion, kind and metadata were once skipped as "Helm rejects a manifest
+// without them"; measurement showed all three render fine when deleted and
+// discriminate weak suites from strong ones.
+func TestYAMLKeyDeleteHasNoKeyExemptions(t *testing.T) {
+	f := tmpl("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: x\n")
+	got := spans(f, mustRun(t, IDYAMLKeyDelete, f))
+	for _, want := range []string{"apiVersion:", "kind:", "metadata:"} {
+		var found bool
+		for _, s := range got {
+			if strings.HasPrefix(strings.TrimSpace(s), want) {
+				found = true
 			}
-		})
+		}
+		if !found {
+			t.Errorf("expected a candidate deleting %q, got %v", want, got)
+		}
 	}
 }
 

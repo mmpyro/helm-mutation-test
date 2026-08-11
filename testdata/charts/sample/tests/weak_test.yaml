@@ -1,0 +1,34 @@
+# A DELIBERATELY WEAK suite.
+#
+# Every test here passes, and `helm unittest` reports it green, yet it asserts
+# almost nothing about the chart's actual content: only that documents of the
+# right kind come out. This is the failure mode mutation testing exists to
+# expose, so this suite is expected to score LOW.
+suite: weak assertions
+templates:
+  - deployment.yaml
+  - service.yaml
+tests:
+  - it: renders a Deployment
+    template: deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+
+  - it: renders a Service
+    template: service.yaml
+    asserts:
+      - isKind:
+          of: Service
+
+  - it: the deployment has a spec
+    template: deployment.yaml
+    asserts:
+      - exists:
+          path: spec
+
+  - it: the service has ports
+    template: service.yaml
+    asserts:
+      - exists:
+          path: spec.ports

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sample
+description: A fixture chart for helm-mutation-test with deliberately weak and strong test suites
+type: application
+version: 0.1.0
+appVersion: "1.16.0"

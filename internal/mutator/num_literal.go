@@ -11,25 +11,6 @@ import (
 
 func init() { register(numLiteral{}) }
 
-// layoutFuncs are template functions whose numeric arguments control *layout*
-// rather than data: indentation width, repetition count, truncation length,
-// format-string width.
-//
-// Mutating those numbers reindents or truncates the surrounding YAML, so the
-// template stops parsing and every test fails on a render error. That is an
-// Invalid mutant: excluded from the score, and pure noise in the report. The
-// mutation is our bug, not the user's missing assertion, so we never generate it.
-var layoutFuncs = map[string]bool{
-	"indent":  true,
-	"nindent": true,
-	"repeat":  true,
-	"trunc":   true,
-	"printf":  true,
-	"substr":  true,
-	"abbrev":  true,
-	"wrap":    true,
-}
-
 // Variant notes, which become part of a mutant's ID.
 const (
 	variantIncrement = "increment"
@@ -38,12 +19,20 @@ const (
 
 // numLiteral perturbs numeric literals: once by +1 to catch off-by-one blindness,
 // and once to zero to catch fields nobody asserts at all.
+//
+// Layout arguments such as `nindent 4` are deliberately NOT exempt. That guard
+// existed here originally on the assumption that reindenting breaks rendering and
+// yields a useless Invalid mutant; measuring against the fixture chart disproved
+// it. `nindent 4 -> 0` and `-> 99` both render fine, survive the weak suite and
+// are caught by the strong one, which makes them exactly the discriminating
+// signal this tool is for. Where such a mutation genuinely does break a render,
+// the Invalid classification handles it honestly rather than silently.
 type numLiteral struct{}
 
 func (numLiteral) ID() string { return IDNumLiteral }
 
 func (numLiteral) Describe() string {
-	return "perturb numeric literals (n -> n+1, n -> 0); skips layout args like nindent"
+	return "perturb numeric literals (n -> n+1, n -> 0)"
 }
 
 func (numLiteral) Mutate(f *source.File) []Candidate {
@@ -59,25 +48,6 @@ func numLiteralTemplateAST(f *source.File) []Candidate {
 		return nil
 	}
 
-	// First pass: every numeric argument of a layout function is off limits.
-	guarded := map[int]bool{}
-	tree.Walk(func(n parse.Node) bool {
-		cmd, ok := n.(*parse.CommandNode)
-		if !ok || len(cmd.Args) == 0 {
-			return true
-		}
-		id, ok := cmd.Args[0].(*parse.IdentifierNode)
-		if !ok || !layoutFuncs[id.Ident] {
-			return true
-		}
-		for _, arg := range cmd.Args[1:] {
-			if num, ok := arg.(*parse.NumberNode); ok {
-				guarded[int(num.Position())] = true
-			}
-		}
-		return true
-	})
-
 	var out []Candidate
 	tree.Walk(func(n parse.Node) bool {
 		num, ok := n.(*parse.NumberNode)
@@ -85,7 +55,7 @@ func numLiteralTemplateAST(f *source.File) []Candidate {
 			return true
 		}
 		start, length, ok := source.CommandArgSpan(num)
-		if !ok || guarded[start] {
+		if !ok {
 			return true
 		}
 		out = append(out, variantsFor(f.Slice(start, start+length), start, start+length)...)

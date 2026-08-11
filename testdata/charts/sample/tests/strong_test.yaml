@@ -1,0 +1,181 @@
+# A THOROUGH suite over the same templates.
+#
+# Every rendered field is pinned to an exact value, both branches of each
+# conditional are exercised, and the `required` guard has a negative test. This
+# suite is expected to score HIGH: almost any mutation to the chart should make
+# one of these assertions fail.
+suite: strong assertions on the deployment
+templates:
+  - deployment.yaml
+tests:
+  - it: pins every deployment field
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: spec.replicas
+          value: 2
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "nginx:1.16.0"
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 80
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].protocol
+          value: TCP
+      - equal:
+          path: spec.selector.matchLabels['app.kubernetes.io/name']
+          value: sample
+      - equal:
+          path: metadata.labels['app.kubernetes.io/managed-by']
+          value: Helm
+
+  - it: mounts the api token from values
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[0].name
+          value: API_TOKEN
+      - equal:
+          path: spec.template.spec.containers[0].env[0].value
+          value: fixture-token
+
+  - it: fails the render when apiToken is absent
+    set:
+      apiToken: null
+    asserts:
+      - failedTemplate:
+          errorMessage: apiToken is required
+
+  - it: sets the service account name when creation is enabled
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: RELEASE-NAME-sample
+
+  - it: omits the service account name when creation is disabled
+    set:
+      serviceAccount.create: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.serviceAccountName
+
+  - it: honours an explicit service account name
+    set:
+      serviceAccount.name: custom-sa
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: custom-sa
+
+  - it: falls back to the chart appVersion when the image tag is empty
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "nginx:1.16.0"
+
+  - it: uses an explicit image tag when one is given
+    set:
+      image.tag: v9.9.9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "nginx:v9.9.9"
+
+  - it: adds the PRODUCTION env var only in prod
+    set:
+      env: prod
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: PRODUCTION
+      - equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: "true"
+
+  - it: omits the PRODUCTION env var outside prod
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 1
+---
+suite: strong assertions on the service
+templates:
+  - service.yaml
+tests:
+  - it: pins every service field
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.externalTrafficPolicy
+          value: Cluster
+      - equal:
+          path: spec.ports[0].port
+          value: 80
+      - equal:
+          path: spec.ports[0].protocol
+          value: TCP
+      - equal:
+          path: spec.ports[0].name
+          value: http
+      - lengthEqual:
+          path: spec.ports
+          count: 1
+
+  - it: honours an overridden service type and port
+    set:
+      service.type: LoadBalancer
+      service.port: 8080
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+      - equal:
+          path: spec.ports[0].port
+          value: 8080
+---
+suite: strong assertions on the ingress
+templates:
+  - ingress.yaml
+tests:
+  - it: renders nothing while the ingress is disabled
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: pins every ingress field once enabled
+    set:
+      ingress.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Ingress
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-sample
+      - equal:
+          path: spec.rules[0].host
+          value: chart.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /
+      - equal:
+          path: spec.rules[0].http.paths[0].pathType
+          value: Prefix
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 80
