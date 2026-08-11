@@ -336,6 +336,58 @@ func TestSkipQuoted(t *testing.T) {
 	}
 }
 
+// TestProbeSpanPreservesVariableDeclarations guards a score-inflating bug. The
+// probe replaces a span with `fail "canary"`, which errors only when evaluated —
+// so a render error is evidence the span ran. Overwriting a "$k, $v :=" prefix
+// leaves the body's variables undeclared and the probe fails to *parse* instead,
+// which happens whether or not the code path runs. The checker cannot tell those
+// apart: it reads any difference from the original as proof of execution, so an
+// unparseable probe would promote a killable mutant to Equivalent.
+func TestProbeSpanPreservesVariableDeclarations(t *testing.T) {
+	tests := []struct {
+		name, src, mutated, wantSpan string
+	}{
+		{
+			"range with two declarations",
+			"{{- range $k, $v := .Values.labels }}\n{{ $k }}: {{ $v }}\n{{- end }}",
+			".Values.labels", ".Values.labels",
+		},
+		{
+			"with and one declaration",
+			"{{- with $cfg := .Values.config }}\nkey: {{ $cfg.a }}\n{{- end }}",
+			".Values.config", ".Values.config",
+		},
+		{
+			// No keyword at all — what helm create scaffolds into every chart.
+			"bare declaration action",
+			"{{- $fullName := include \"c.fullname\" . -}}\nname: {{ $fullName }}\n",
+			"include", `include "c.fullname" .`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			lo := strings.Index(tc.src, tc.mutated)
+			if lo < 0 {
+				t.Fatalf("needle %q not in source", tc.mutated)
+			}
+			ps, pe, ok := ProbeSpan(f, lo, lo+len(tc.mutated))
+			if !ok {
+				t.Fatal("ProbeSpan returned !ok")
+			}
+			if got := f.Slice(ps, pe); got != tc.wantSpan {
+				t.Fatalf("probe span = %q, want %q", got, tc.wantSpan)
+			}
+			// The whole point: the probed template must still parse, or the render
+			// error proves nothing about execution.
+			probed := f.Apply(ps, pe, `fail "canary"`)
+			if _, err := ParseTemplate(New(probed, f.AbsPath, f.Path, f.Kind)); err != nil {
+				t.Fatalf("probed template does not parse: %v\n%s", err, probed)
+			}
+		})
+	}
+}
+
 func TestEnclosingPipelineSpanKeepsKeywordsAndTrimMarkers(t *testing.T) {
 	// The probe replaces a pipeline with `fail "canary"`, which errors only when
 	// evaluated. Overwriting the keyword too would break block structure and turn
@@ -354,6 +406,9 @@ func TestEnclosingPipelineSpanKeepsKeywordsAndTrimMarkers(t *testing.T) {
 		{"with", "{{- with .Values.a }}\nx: 1\n{{- end }}", ".Values.a", ".Values.a"},
 		{"range", "{{- range .Values.list }}\n- {{ . }}\n{{- end }}", ".Values.list", ".Values.list"},
 		{"else if", "{{- if .A }}\n{{- else if .Values.b }}\nx: 1\n{{- end }}", ".Values.b", ".Values.b"},
+		{"range with declarations", "{{- range $k, $v := .Values.labels }}\n{{ $k }}\n{{- end }}", ".Values.labels", ".Values.labels"},
+		{"with declaration", "{{- with $cfg := .Values.a }}\nx: 1\n{{- end }}", ".Values.a", ".Values.a"},
+		{"declaration action", "{{- $n := include \"c.name\" . -}}\n", "include", `include "c.name" .`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

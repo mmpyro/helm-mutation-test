@@ -539,6 +539,17 @@ func EnclosingPipelineSpan(f *File, offset int) (start, end int, ok bool) {
 		}
 	}
 
+	// A declaration must survive the probe. Overwriting "$k, $v :=" leaves the
+	// body's variables undeclared, so the probed template no longer parses — and a
+	// parse failure is a difference the checker reads as proof of execution, which
+	// would exclude a killable mutant from the score. The keyword cut above is
+	// independent, so this also covers a bare declaration action with no keyword,
+	// such as the {{- $fullName := include "chart.fullname" . -}} that helm create
+	// scaffolds into every chart.
+	if rest, cut := cutDeclarations(inner[lead:]); cut {
+		lead = len(inner) - len(rest)
+	}
+
 	start = a.InnerStart + lead
 	end = a.InnerEnd
 	for start < end && isSpace(f.Bytes[start]) {
