@@ -1,0 +1,337 @@
+package source
+
+import (
+	"strings"
+	"testing"
+	"text/template/parse"
+)
+
+func TestParseTemplateAcceptsHelmBuiltins(t *testing.T) {
+	// The whole point of parse.SkipFuncCheck: none of these functions exist in
+	// text/template, and we must not have to reconstruct Helm's funcmap to parse.
+	src := `
+apiVersion: apps/v1
+metadata:
+  name: {{ include "chart.fullname" . }}
+  labels: {{- toYaml .Values.labels | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount | default 3 }}
+  token: {{ required "token is required" .Values.token | quote }}
+  ver: {{ .Chart.AppVersion | trunc 63 | trimSuffix "-" }}
+`
+	if _, err := ParseTemplate(mk(t, src)); err != nil {
+		t.Fatalf("ParseTemplate rejected Helm builtins: %v", err)
+	}
+}
+
+func TestParseTemplateReturnsErrorOnBrokenTemplate(t *testing.T) {
+	// A parse failure must be reported, not panic: callers downgrade to
+	// line-based mutators and record the file as skipped.
+	if _, err := ParseTemplate(mk(t, `{{ if .Values.x }}no end tag`)); err == nil {
+		t.Fatal("expected a parse error for an unterminated if")
+	}
+}
+
+func TestWalkVisitsDefineBlocks(t *testing.T) {
+	// _helpers.tpl is nothing but define blocks. Walking only the main root would
+	// find zero mutation sites in it.
+	src := `{{- define "chart.name" -}}
+{{ .Values.nameOverride | default "fallback" }}
+{{- end -}}
+{{- define "chart.other" -}}
+{{ if .Values.flag }}yes{{ end }}
+{{- end -}}`
+	tree, err := ParseTemplate(mk(t, src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var strs []string
+	var ifs int
+	tree.Walk(func(n parse.Node) bool {
+		switch node := n.(type) {
+		case *parse.StringNode:
+			strs = append(strs, node.Text)
+		case *parse.IfNode:
+			ifs++
+		}
+		return true
+	})
+
+	if len(strs) != 1 || strs[0] != "fallback" {
+		t.Errorf("expected to find the string inside the first define, got %v", strs)
+	}
+	if ifs != 1 {
+		t.Errorf("expected to find the if inside the second define, got %d", ifs)
+	}
+}
+
+func TestWalkDoesNotVisitNodesTwice(t *testing.T) {
+	tree, err := ParseTemplate(mk(t, `{{ if .Values.a }}x{{ end }}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ifs int
+	tree.Walk(func(n parse.Node) bool {
+		if _, ok := n.(*parse.IfNode); ok {
+			ifs++
+		}
+		return true
+	})
+	if ifs != 1 {
+		t.Errorf("if node visited %d times, want exactly 1", ifs)
+	}
+}
+
+func TestWalkSkipsChildrenWhenFnReturnsFalse(t *testing.T) {
+	tree, err := ParseTemplate(mk(t, `{{ if .Values.a }}{{ .Values.b }}{{ end }}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields int
+	tree.Walk(func(n parse.Node) bool {
+		if _, ok := n.(*parse.IfNode); ok {
+			return false // prune
+		}
+		if _, ok := n.(*parse.FieldNode); ok {
+			fields++
+		}
+		return true
+	})
+	if fields != 0 {
+		t.Errorf("pruning the if should hide its descendants, but found %d field nodes", fields)
+	}
+}
+
+func TestFindAction(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       string
+		wantInner string
+	}{
+		{"plain", `a: {{ .Values.x }}`, ".Values.x "},
+		{"left trim", `a: {{- .Values.x }}`, ".Values.x "},
+		{"right trim", `a: {{ .Values.x -}}`, ".Values.x "},
+		{"both trims", `a: {{- .Values.x -}}`, ".Values.x "},
+		{"if action", `{{- if .Values.enabled }}`, `if .Values.enabled `},
+		{"closing braces in a string literal", `a: {{ printf "%s}}" .x }}`, `printf "%s}}" .x `},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			offset := strings.Index(tc.src, "{{") + 3
+			a, ok := FindAction(f, offset)
+			if !ok {
+				t.Fatalf("FindAction found no action in %q", tc.src)
+			}
+			// Inner drops delimiters and trim markers but deliberately preserves
+			// interior padding; trimming for comparison is the caller's job.
+			if got := strings.TrimSpace(a.Inner(f)); got != strings.TrimSpace(tc.wantInner) {
+				t.Errorf("Inner() = %q, want %q", got, strings.TrimSpace(tc.wantInner))
+			}
+			if strings.ContainsAny(a.Inner(f), "{}") && !strings.Contains(tc.src, `"`) {
+				t.Errorf("Inner() leaked a delimiter or trim marker: %q", a.Inner(f))
+			}
+			if f.Slice(a.Start, a.Start+2) != "{{" {
+				t.Errorf("action does not start at {{: %q", f.Slice(a.Start, a.Start+4))
+			}
+			if f.Slice(a.End-2, a.End) != "}}" {
+				t.Errorf("action does not end at }}: %q", f.Slice(a.End-4, a.End))
+			}
+		})
+	}
+}
+
+func TestFindActionRejectsOffsetsInPlainText(t *testing.T) {
+	f := mk(t, "kind: Deployment\nname: {{ .Values.name }}\n")
+	// Offset 3 is inside "kind:", which is plain text, not an action.
+	if _, ok := FindAction(f, 3); ok {
+		t.Error("FindAction should not claim plain text is inside an action")
+	}
+	// An offset after a closed action is also plain text.
+	if _, ok := FindAction(f, len(f.Bytes)-1); ok {
+		t.Error("FindAction should not match text after the closing }}")
+	}
+}
+
+func TestSpanOfKeywordArgument(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		keyword string
+		want    string
+	}{
+		{"simple if", `{{ if .Values.enabled }}`, "if", ".Values.enabled"},
+		{"trimmed if", `{{- if .Values.enabled }}`, "if", ".Values.enabled"},
+		{"both trims", `{{- if .Values.enabled -}}`, "if", ".Values.enabled"},
+		{"compound condition", `{{- if and .Values.a .Values.b }}`, "if", "and .Values.a .Values.b"},
+		{"eq condition", `{{ if eq .Values.env "prod" }}`, "if", `eq .Values.env "prod"`},
+		{"with", `{{- with .Values.resources }}`, "with", ".Values.resources"},
+		{"else if", `{{- else if .Values.other }}`, "else", `if .Values.other`},
+		{"no padding", `{{if .Values.x}}`, "if", ".Values.x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			start, end, ok := SpanOfKeywordArgument(f, strings.Index(tc.src, "{{")+2, tc.keyword)
+			if !ok {
+				t.Fatalf("SpanOfKeywordArgument(%q, %q) failed", tc.src, tc.keyword)
+			}
+			if got := f.Slice(start, end); got != tc.want {
+				t.Errorf("span = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSpanOfKeywordArgumentRejectsWrongKeyword(t *testing.T) {
+	f := mk(t, `{{ range .Values.list }}`)
+	if _, _, ok := SpanOfKeywordArgument(f, 2, "if"); ok {
+		t.Error("asking for 'if' in a range action should not match")
+	}
+	// "iffy" must not be mistaken for the "if" keyword.
+	f2 := mk(t, `{{ iffy .Values.x }}`)
+	if _, _, ok := SpanOfKeywordArgument(f2, 2, "if"); ok {
+		t.Error("'iffy' must not match the keyword 'if'")
+	}
+}
+
+func TestSpanOfKeywordArgumentRejectsBareKeyword(t *testing.T) {
+	// "{{ end }}" has no argument to negate.
+	f := mk(t, `{{ end }}`)
+	if _, _, ok := SpanOfKeywordArgument(f, 2, "end"); ok {
+		t.Error("a keyword with no argument should not yield a span")
+	}
+}
+
+func TestSpanOfKeywordArgumentWrapsCorrectly(t *testing.T) {
+	// The end-to-end contract cond-negate depends on: replacing the returned span
+	// with "not (span)" must produce a valid, still-trimmed action.
+	src := "{{- if .Values.ingress.enabled }}\nhost: x\n{{- end }}"
+	f := mk(t, src)
+	start, end, ok := SpanOfKeywordArgument(f, 2, "if")
+	if !ok {
+		t.Fatal("no span found")
+	}
+	got := string(f.Apply(start, end, "not ("+f.Slice(start, end)+")"))
+	want := "{{- if not (.Values.ingress.enabled) }}\nhost: x\n{{- end }}"
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	if _, err := ParseTemplate(mk(t, got)); err != nil {
+		t.Errorf("the mutated template must still parse: %v", err)
+	}
+}
+
+// TestFieldNodePositionIsNotTheFieldStart pins down a text/template quirk that
+// silently corrupts edits if assumed away: a FieldNode's Position() points just
+// past its first segment, not at the leading dot. CommandArgSpan therefore
+// refuses FieldNode rather than returning a shifted span.
+func TestFieldNodePositionIsNotTheFieldStart(t *testing.T) {
+	f := mk(t, `{{ .Values.token }}`)
+	tree, err := ParseTemplate(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var field *parse.FieldNode
+	tree.Walk(func(n parse.Node) bool {
+		if fn, ok := n.(*parse.FieldNode); ok {
+			field = fn
+		}
+		return true
+	})
+	if field == nil {
+		t.Fatal("no FieldNode found")
+	}
+	if got := f.Slice(int(field.Position()), len(f.Bytes)); !strings.HasPrefix(got, ".token") {
+		t.Fatalf("this test encodes the quirk; Position() now yields %q", got)
+	}
+	if _, _, ok := CommandArgSpan(field); ok {
+		t.Error("CommandArgSpan must refuse FieldNode: its position is not the field start")
+	}
+}
+
+func TestCommandArgSpanSupportedNodes(t *testing.T) {
+	f := mk(t, `{{ printf "lit" 42 true }}`)
+	tree, err := ParseTemplate(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]string{}
+	tree.Walk(func(n parse.Node) bool {
+		start, length, ok := CommandArgSpan(n)
+		if !ok {
+			return true
+		}
+		switch n.(type) {
+		case *parse.StringNode:
+			found["string"] = f.Slice(start, start+length)
+		case *parse.NumberNode:
+			found["number"] = f.Slice(start, start+length)
+		case *parse.BoolNode:
+			found["bool"] = f.Slice(start, start+length)
+		case *parse.IdentifierNode:
+			found["ident"] = f.Slice(start, start+length)
+		}
+		return true
+	})
+	want := map[string]string{"string": `"lit"`, "number": "42", "bool": "true", "ident": "printf"}
+	for k, v := range want {
+		if found[k] != v {
+			t.Errorf("%s span = %q, want %q", k, found[k], v)
+		}
+	}
+}
+
+func TestSegmentsOfComputesDropSpans(t *testing.T) {
+	f := mk(t, `x: {{ .Values.a | default "y" | quote }}`)
+	tree, err := ParseTemplate(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segs []PipeSegment
+	tree.Walk(func(n parse.Node) bool {
+		if p, ok := n.(*parse.PipeNode); ok {
+			segs = SegmentsOf(f, p)
+		}
+		return true
+	})
+	if len(segs) != 3 {
+		t.Fatalf("got %d segments, want 3", len(segs))
+	}
+	if segs[0].Droppable {
+		t.Error("the first command must not be droppable: nothing would feed the pipeline")
+	}
+	// Dropping the middle segment leaves the rest of the pipeline intact.
+	if got := string(f.Apply(segs[1].DropStart, segs[1].DropEnd, "")); got != `x: {{ .Values.a | quote }}` {
+		t.Errorf("dropping segment 1 gave %q", got)
+	}
+	if got := string(f.Apply(segs[2].DropStart, segs[2].DropEnd, "")); got != `x: {{ .Values.a | default "y" }}` {
+		t.Errorf("dropping segment 2 gave %q", got)
+	}
+}
+
+func TestSkipQuoted(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		advance bool
+	}{
+		{"double quoted", `"abc"`, true},
+		{"escaped quote inside", `"a\"b"`, true},
+		{"backtick raw", "`a\"b`", true},
+		{"unterminated", `"abc`, false},
+		{"newline before close", "\"abc\ndef\"", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := skipQuoted([]byte(tc.src), 0)
+			if tc.advance && got <= 0 {
+				t.Errorf("skipQuoted(%q) = %d, expected it to advance past the close quote", tc.src, got)
+			}
+			if !tc.advance && got != 0 {
+				t.Errorf("skipQuoted(%q) = %d, expected 0 for an unterminated run", tc.src, got)
+			}
+		})
+	}
+}
