@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -446,6 +447,20 @@ func redBaselineChart(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dst
+}
+
+// osReadDirNames lists a directory's entry names, sorted.
+func osReadDirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func copyTree(t *testing.T, src, dst string) {
