@@ -57,3 +57,39 @@ func TestWithMutatedFileRejectsAnUnknownPath(t *testing.T) {
 		t.Fatal("want an error for a path the chart does not contain")
 	}
 }
+
+func TestWithMutatedFileAcceptsValuesYml(t *testing.T) {
+	// Both values.yaml and values.yml are valid chart value files; equivalence
+	// detection must support both spellings.
+	c := testChart(map[string]any{"replicas": 1}, map[string]string{
+		"templates/a.yaml": "replicas: {{ .Values.replicas }}\n",
+	})
+	mutated, err := WithMutatedFile(c, "values.yml", []byte("replicas: 5\n"))
+	if err != nil {
+		t.Fatalf("WithMutatedFile: %v", err)
+	}
+	out, err := Render(mutated, RenderContext{Name: "ctx"})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(out["probe/templates/a.yaml"], "replicas: 5") {
+		t.Fatalf("mutated values.yml did not reach the render: %q", out["probe/templates/a.yaml"])
+	}
+}
+
+func TestWithMutatedFilePreservesBaseChartValuesImmutability(t *testing.T) {
+	// One loaded chart serves every mutant; the values branch must not leak
+	// mutations back into the base chart or later mutants inherit them.
+	c := testChart(map[string]any{"original": "value"}, map[string]string{
+		"templates/a.yaml": "a: 1\n",
+	})
+	if _, err := WithMutatedFile(c, "values.yaml", []byte("mutated: data\n")); err != nil {
+		t.Fatalf("WithMutatedFile: %v", err)
+	}
+	if got, ok := c.Values["original"]; !ok || got != "value" {
+		t.Fatalf("base chart values were modified: original key missing or changed to %v", got)
+	}
+	if _, ok := c.Values["mutated"]; ok {
+		t.Fatalf("base chart values were modified: mutated key should not exist")
+	}
+}
