@@ -4,6 +4,7 @@ package runner
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"sort"
 	"time"
@@ -50,6 +51,11 @@ func SilenceLibraryLogging(debug bool) {
 // A suite file may hold several suites separated by "---", so the file path
 // alone is not unique; Ordinal disambiguates them, and Name keeps the key
 // readable in reports.
+//
+// File is CHART-RELATIVE, and must stay that way. Each worker re-parses suites
+// from its own copy of the chart in a temp directory, so an absolute path differs
+// per worker and the keys would never match the ones the baseline recorded —
+// every mutant would silently run zero suites and be reported as NoCoverage.
 type SuiteKey struct {
 	File    string `json:"file"`
 	Name    string `json:"name"`
@@ -118,7 +124,7 @@ func DiscoverSuites(chartDir string, chart *v3chart.Chart, opts Options) ([]*Sui
 			if ts == nil {
 				continue
 			}
-			out = append(out, describe(file, i, ts))
+			out = append(out, describe(relativeToChart(chartDir, file), i, ts))
 		}
 	}
 
@@ -127,6 +133,21 @@ func DiscoverSuites(chartDir string, chart *v3chart.Chart, opts Options) ([]*Sui
 		ptrs[i] = &out[i]
 	}
 	return ptrs, nil
+}
+
+// relativeToChart converts a discovered suite path into a chart-relative one, so
+// SuiteKeys are comparable across the baseline chart and each worker's copy.
+func relativeToChart(chartDir, file string) string {
+	absChart, err1 := filepath.Abs(chartDir)
+	absFile, err2 := filepath.Abs(file)
+	if err1 != nil || err2 != nil {
+		return filepath.ToSlash(file)
+	}
+	rel, err := filepath.Rel(absChart, absFile)
+	if err != nil {
+		return filepath.ToSlash(file)
+	}
+	return filepath.ToSlash(rel)
 }
 
 func describe(file string, ordinal int, ts *unittest.TestSuite) Suite {

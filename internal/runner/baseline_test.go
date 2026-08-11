@@ -51,9 +51,28 @@ func strongOpts() Options {
 	return Options{TestFiles: []string{"tests/strong_test.yaml"}, WithSubChart: true}
 }
 
+// TestMain doubles as the worker entry point so tests drive the real subprocess
+// protocol rather than a stand-in. The parent launches this same binary with
+// -test.run=TestWorkerEntryPoint and the worker env var set.
 func TestMain(m *testing.M) {
 	SilenceLibraryLogging(false)
+	SetWorkerArgs([]string{"-test.run=TestWorkerEntryPoint"})
 	os.Exit(m.Run())
+}
+
+// TestWorkerEntryPoint is not a test: when the worker env var is present it
+// serves the worker protocol on stdin/stdout and exits.
+func TestWorkerEntryPoint(t *testing.T) {
+	chartRoot, opts, failFast, ok := WorkerBootstrapFromEnv()
+	if !ok {
+		t.Skip("not running as a worker")
+	}
+	if err := RunWorkerLoop(chartRoot, opts, failFast, os.Stdin, os.Stdout); err != nil {
+		// Exit non-zero without test framework noise on stdout, which carries the
+		// protocol.
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
 
 func TestRunBaselinePassesOnTheFixture(t *testing.T) {
