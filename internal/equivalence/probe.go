@@ -32,32 +32,38 @@ func ProbeBytes(f *source.File, start, end int) ([]byte, bool) {
 }
 
 // valuesProbe rewrites a values.yaml span so that any template reading the key
-// sees a different value.
+// sees a different value, using the YAML parser to safely locate key blocks and
+// scalar values.
 //
-// Two shapes occur. A yaml-key-delete span covers "key: value" — possibly a
-// whole nested block — and is rebuilt as `key: "<canary>"`, which also flattens
-// a map into a scalar and so is maximally disruptive. Any other span is the
-// scalar value itself and is simply replaced.
+// Two shapes occur. A key block covers "key: value" — possibly a whole nested
+// block — and is rebuilt as `key: "<canary>"`, preserving indentation. A non-key
+// scalar is simply replaced with the quoted canary. Any other span returns ok=false,
+// preferring safety to guessing.
 func valuesProbe(f *source.File, start, end int) ([]byte, bool) {
-	span := f.Slice(start, end)
-	quoted := `"` + Canary + `"`
-
-	colon := strings.IndexByte(span, ':')
-	if colon < 0 {
-		// A bare scalar. Reject anything that looks structural rather than a value.
-		if strings.ContainsAny(span, "\n-") {
-			return nil, false
+	// Check if this span matches a key block exactly.
+	keyBlocks, err := source.KeyBlocksOf(f)
+	if err == nil {
+		for _, kb := range keyBlocks {
+			if kb.Start == start && kb.End == end {
+				// Rebuild as "key: "<canary>"" at the same indentation.
+				indent := strings.Repeat(" ", kb.Indent)
+				newValue := indent + kb.Name + ": \"" + Canary + "\"\n"
+				return f.Apply(start, end, newValue), true
+			}
 		}
-		return f.Apply(start, end, quoted), true
 	}
 
-	key := span[:colon]
-	if strings.ContainsAny(key, "\n#") || strings.TrimSpace(key) == "" {
-		return nil, false
+	// Check if this span matches a non-key scalar exactly.
+	scalars, err := source.ScalarsOf(f)
+	if err == nil {
+		for _, s := range scalars {
+			if !s.IsKey && s.Start == start && s.End == end {
+				// Replace the scalar with the quoted canary.
+				return f.Apply(start, end, `"`+Canary+`"`), true
+			}
+		}
 	}
-	trailing := ""
-	if strings.HasSuffix(span, "\n") {
-		trailing = "\n"
-	}
-	return f.Apply(start, end, key+": "+quoted+trailing), true
+
+	// No exact match found; cannot safely probe this span.
+	return nil, false
 }

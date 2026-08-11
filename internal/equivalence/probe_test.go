@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mmpyro/helm-mutation-test/internal/source"
+	"gopkg.in/yaml.v3"
 )
 
 func templateFile(src string) *source.File {
@@ -74,6 +75,113 @@ func TestProbeBytesReplacesABareValuesScalar(t *testing.T) {
 	want := "replicas: \"" + Canary + "\"\n"
 	if string(got) != want {
 		t.Fatalf("probe = %q, want %q", got, want)
+	}
+}
+
+func TestProbeBytesHandlesScalarsWithColons(t *testing.T) {
+	// A bare scalar whose value contains a colon must produce valid YAML.
+	// The old heuristic would mistake the colon in the value for a key:value separator.
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"quoted scalar with colon",
+			"annotation: \"a: b\"\n",
+			"annotation: \"" + Canary + "\"\n",
+		},
+		{
+			"unquoted image tag",
+			"image: nginx:1.21\n",
+			"image: \"" + Canary + "\"\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := valuesFile(tc.src)
+			scalars, err := source.ScalarsOf(f)
+			if err != nil {
+				t.Fatalf("ScalarsOf error: %v", err)
+			}
+			if len(scalars) == 0 {
+				t.Fatal("no scalars found")
+			}
+			// Find the non-key scalar (the value)
+			var s source.Scalar
+			for _, sc := range scalars {
+				if !sc.IsKey {
+					s = sc
+					break
+				}
+			}
+			if s.Start == 0 && s.End == 0 {
+				t.Fatal("no non-key scalar found")
+			}
+
+			got, ok := ProbeBytes(f, s.Start, s.End)
+			if !ok {
+				t.Fatal("ProbeBytes returned !ok")
+			}
+			if string(got) != tc.want {
+				t.Fatalf("probe = %q, want %q", got, tc.want)
+			}
+			// Verify the result is valid YAML
+			var result interface{}
+			if err := yaml.Unmarshal(got, &result); err != nil {
+				t.Fatalf("probe output is not valid YAML: %v", err)
+			}
+		})
+	}
+}
+
+func TestProbeBytesHandlesScalarsWithHyphens(t *testing.T) {
+	// A bare scalar like "my-service-name" contains a hyphen but should still get
+	// a probe. The old heuristic would reject any value containing a hyphen.
+	src := "service: my-service-name\n"
+	f := valuesFile(src)
+	scalars, err := source.ScalarsOf(f)
+	if err != nil {
+		t.Fatalf("ScalarsOf error: %v", err)
+	}
+	if len(scalars) == 0 {
+		t.Fatal("no scalars found")
+	}
+	// Find the non-key scalar
+	var s source.Scalar
+	for _, sc := range scalars {
+		if !sc.IsKey {
+			s = sc
+			break
+		}
+	}
+	if s.Start == 0 && s.End == 0 {
+		t.Fatal("no non-key scalar found")
+	}
+
+	got, ok := ProbeBytes(f, s.Start, s.End)
+	if !ok {
+		t.Fatal("ProbeBytes returned !ok for scalar with hyphens")
+	}
+	want := "service: \"" + Canary + "\"\n"
+	if string(got) != want {
+		t.Fatalf("probe = %q, want %q", got, want)
+	}
+	// Verify the result is valid YAML
+	var result interface{}
+	if err := yaml.Unmarshal(got, &result); err != nil {
+		t.Fatalf("probe output is not valid YAML: %v", err)
+	}
+}
+
+func TestProbeBytesRefusesSpansThatDontMatchParsedElements(t *testing.T) {
+	// A span that doesn't exactly match a parsed scalar or key block must be refused.
+	// This prevents guessing at partial or off-by-one inputs.
+	src := "replicas: 3\n"
+	f := valuesFile(src)
+	// Span that spans from the colon into the value (doesn't match either scalar or key)
+	if _, ok := ProbeBytes(f, 8, 11); ok {
+		t.Fatal("want !ok for span that doesn't match a parsed element")
 	}
 }
 
