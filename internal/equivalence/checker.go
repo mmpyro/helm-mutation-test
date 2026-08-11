@@ -2,6 +2,8 @@ package equivalence
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/mmpyro/helm-mutation-test/internal/source"
@@ -17,6 +19,19 @@ type Mutation struct {
 }
 
 func (m Mutation) spanKey() string { return fmt.Sprintf("%s:%d:%d", m.File, m.Start, m.End) }
+
+// contextsKey identifies a set of contexts by name, independent of order, so the
+// probe cache cannot serve one caller's context list with another's answer. Task
+// 7 guarantees context names are unique per test job, so names alone are a valid
+// identity.
+func contextsKey(ctxs []RenderContext) string {
+	names := make([]string, len(ctxs))
+	for i, ctx := range ctxs {
+		names[i] = ctx.Name
+	}
+	sort.Strings(names)
+	return strings.Join(names, "\x00")
+}
 
 // Verdict is the outcome of judging one mutation. Detail is human-facing and
 // lands in Mutant.Detail, so it must explain the verdict either way.
@@ -36,7 +51,7 @@ type Checker struct {
 
 	mu       sync.Mutex
 	original map[string]map[string]string // context name -> manifests
-	probed   map[string]bool              // span key -> was the span proven to execute
+	probed   map[string]bool              // span key + context set -> was the span proven to execute
 }
 
 // NewChecker returns a checker over a loaded chart and the source files the
@@ -97,7 +112,8 @@ func (c *Checker) Judge(m Mutation, ctxs []RenderContext) Verdict {
 	}
 	if !executed {
 		return Verdict{Detail: fmt.Sprintf(
-			"not exercised by any covering test: the span produced no output under any of %d value sets",
+			"not exercised by any covering test: the probe caused no render error and no output "+
+				"difference under any of %d value sets, so the span itself never ran",
 			len(ctxs))}
 	}
 	return Verdict{Equivalent: true, Detail: fmt.Sprintf(
@@ -123,14 +139,18 @@ func (c *Checker) renderOriginal(ctx RenderContext) (map[string]string, error) {
 	return out, nil
 }
 
-// probeExecuted reports whether the mutated span demonstrably runs. The probe
-// depends only on the span, so the answer is memoised per span.
+// probeExecuted reports whether the mutated span demonstrably runs under ctxs.
+// The probe itself depends only on the span, but "proven to execute" is a claim
+// about a specific context set — a span proven to run under [ctx1, ctx2] is not
+// proven to run under [ctx3], so the cache key must include the context set, not
+// just the span, or a later call with a narrower or different set of contexts
+// could read a stale true and call a survivor equivalent on evidence it never saw.
 //
 // A render error counts as proof: the probe's `fail` evaluates only when it is
 // reached. So does any change in output, which is what the values.yaml sentinel
 // produces.
 func (c *Checker) probeExecuted(m Mutation, f *source.File, ctxs []RenderContext) (bool, error) {
-	key := m.spanKey()
+	key := m.spanKey() + "|" + contextsKey(ctxs)
 	c.mu.Lock()
 	cached, ok := c.probed[key]
 	c.mu.Unlock()
@@ -140,7 +160,7 @@ func (c *Checker) probeExecuted(m Mutation, f *source.File, ctxs []RenderContext
 
 	data, ok := ProbeBytes(f, m.Start, m.End)
 	if !ok {
-		return false, fmt.Errorf("no probe can be built for %s", key)
+		return false, fmt.Errorf("no probe can be built for %s", m.spanKey())
 	}
 	probeChart, err := WithMutatedFile(c.base, m.File, data)
 	if err != nil {

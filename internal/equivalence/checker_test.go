@@ -2,6 +2,7 @@ package equivalence
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mmpyro/helm-mutation-test/internal/source"
@@ -80,5 +81,64 @@ func TestJudgeIsInconclusiveWithoutContexts(t *testing.T) {
 	v := c.Judge(mutationAt(t, f, ".Values.replicas", "99"), nil)
 	if v.Equivalent {
 		t.Fatal("no contexts means no evidence, which must not mean equivalent")
+	}
+}
+
+func TestProbeProofDoesNotLeakAcrossDifferentContextSets(t *testing.T) {
+	// The probe answers "did this span run under these contexts", not "does this
+	// span ever run anywhere". A cache keyed on the span alone would let a later,
+	// narrower context set inherit a proof it never earned for itself — exactly
+	// the false equivalent this feature must never produce. Both calls share one
+	// Checker so its cache is actually exercised across the two context sets.
+	src := "{{- if .Values.enabled }}\nspec:\n  {{ .Values.block | nindent 2 }}\n{{- end }}\n"
+	c, f := judgeFixture(t, src, map[string]any{"enabled": false, "block": "a: 1"})
+	m := mutationAt(t, f, "nindent 2", "nindent 3")
+
+	enabled := []RenderContext{{Name: "enabled", Values: map[string]any{"enabled": true, "block": "a: 1"}}}
+	v := c.Judge(m, enabled)
+	if !v.Equivalent {
+		t.Fatalf("want equivalent when the branch runs, got survived: %s", v.Detail)
+	}
+
+	// A disjoint context set that never reaches the branch. If the probe cache
+	// keyed on the span alone, this call would read the "enabled" set's cached
+	// proof and wrongly call this span equivalent too.
+	disabled := []RenderContext{{Name: "disabled"}}
+	v = c.Judge(m, disabled)
+	if v.Equivalent {
+		t.Fatalf("a different context set that never reaches the span must not inherit the earlier proof: %s", v.Detail)
+	}
+}
+
+func TestJudgeIsSafeForConcurrentCallers(t *testing.T) {
+	// Task 8 calls Judge from a worker pool. Sequential tests under -race prove
+	// nothing about that; this drives the shared render and probe caches from
+	// many goroutines at once, including repeated calls for the same span and
+	// context set so both cache paths in renderOriginal and probeExecuted are
+	// actually contended.
+	src := "spec:\n  {{ .Values.block | nindent 2 }}\n"
+	c, f := judgeFixture(t, src, map[string]any{"block": "a: 1"})
+	m := mutationAt(t, f, "nindent 2", "nindent 3")
+	ctxs := []RenderContext{{Name: "ctx"}}
+
+	const goroutines = 50
+	verdicts := make([]Verdict, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			verdicts[i] = c.Judge(m, ctxs)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, v := range verdicts {
+		if !v.Equivalent {
+			t.Fatalf("goroutine %d: want equivalent, got survived: %s", i, v.Detail)
+		}
+		if v.Detail != verdicts[0].Detail {
+			t.Fatalf("goroutine %d: verdicts disagree: %q vs %q", i, v.Detail, verdicts[0].Detail)
+		}
 	}
 }
