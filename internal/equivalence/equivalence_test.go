@@ -81,3 +81,29 @@ func TestCompareTreatsAMissingTemplateAsADifference(t *testing.T) {
 		t.Fatal("a template that stopped rendering must not compare equal")
 	}
 }
+
+func TestCompareIsExactForRawTextTemplates(t *testing.T) {
+	// Raw text validators like matchSnapshotRaw observe the rendered string
+	// directly, so any byte difference — including trailing whitespace — is
+	// observable. YAML indentation differences remain harmless.
+	txtA := map[string]string{"NOTES.txt": "Hello\n"}
+	txtB := map[string]string{"NOTES.txt": "Hello\n\n"}
+	equal, err := Compare(txtA, txtB)
+	if err != nil {
+		t.Fatalf("Compare: %v", err)
+	}
+	if equal {
+		t.Fatal("a .txt template with trailing whitespace change must not compare equal")
+	}
+
+	// Confirm indentation still does not matter for YAML templates.
+	yamlA := map[string]string{"x.yaml": "spec:\n  a: 1\n"}
+	yamlB := map[string]string{"x.yaml": "spec:\n    a: 1\n"}
+	equal, err = Compare(yamlA, yamlB)
+	if err != nil {
+		t.Fatalf("Compare: %v", err)
+	}
+	if !equal {
+		t.Fatal("YAML indentation changes must still compare equal")
+	}
+}

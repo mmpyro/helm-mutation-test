@@ -3,10 +3,12 @@
 //
 // A mutant is equivalent when the chart renders to identical parsed documents
 // with and without it, under every value set the covering tests use. That is a
-// proof rather than a heuristic: helm-unittest computes every assertion —
-// snapshots included — from the parsed manifest tree, never from the rendered
-// text, so two renders that parse identically cannot be told apart by any
-// assertion in any suite.
+// proof rather than a heuristic: helm-unittest computes assertions on YAML
+// manifests from the parsed tree, never from rendered text, so two renders that
+// parse identically cannot be told apart by any YAML assertion in any suite.
+// Raw text templates (paths ending in .txt) are compared exactly; because
+// raw validators like matchSnapshotRaw observe the rendered string directly,
+// any byte difference is observable.
 //
 // This package imports Helm but nothing from internal/runner. The runner adapts
 // helm-unittest's suites into the RenderContexts consumed here, which keeps the
@@ -85,10 +87,12 @@ func withMetadata(chrt *chart.Chart, ctx RenderContext) *chart.Chart {
 
 // Compare reports whether two renders are indistinguishable to an assertion.
 //
-// Bytes are checked first because byte equality is unambiguous and cheap. Only
-// on a difference do we parse, because parsed equality is the property that
-// actually matters: `nindent 4 -> 5` changes every byte of a block and none of
-// its data.
+// For .txt templates, exact string equality is required; raw text validators
+// like matchSnapshotRaw observe the rendered output directly.
+// For YAML templates, bytes are checked first because byte equality is
+// unambiguous and cheap. Only on a difference do we parse, because parsed
+// equality is what matters: `nindent 4 -> 5` changes every byte yet none of
+// the data.
 func Compare(a, b map[string]string) (bool, error) {
 	if len(a) != len(b) {
 		return false, nil
@@ -100,6 +104,11 @@ func Compare(a, b map[string]string) (bool, error) {
 		}
 		if textA == textB {
 			continue
+		}
+		// Raw text templates (.txt) are compared exactly; YAML templates are
+		// compared after parsing to ignore harmless formatting differences.
+		if strings.HasSuffix(name, ".txt") {
+			return false, nil
 		}
 		docsA, err := parseDocs(textA)
 		if err != nil {
