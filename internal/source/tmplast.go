@@ -492,3 +492,244 @@ func EnclosingPipelineSpan(f *File, offset int) (start, end int, ok bool) {
 	// Content is a single identifier: a bare keyword with no arguments.
 	return 0, 0, false
 }
+
+// ProbeSpan returns the span an execution probe must overwrite to prove that the
+// mutation at [start,end) was evaluated.
+//
+// Overwriting the whole enclosing pipeline only proves that much when reaching
+// the action implies evaluating the mutated sub-expression. Go templates
+// short-circuit `and` and `or`, so in
+//
+//	{{- if and .Values.ingress.enabled (eq .Values.ingress.className "nginx") }}
+//
+// with ingress.enabled false under every context, the `eq` never runs — yet a
+// probe over the whole `and ...` pipeline still errors, proving the action was
+// reached and nothing at all about the mutated operand. Believing it reclassifies
+// a mutant that a missing test would have killed as unkillable, which raises the
+// score.
+//
+// So when the mutation sits behind a short circuit the span narrows to the
+// innermost parenthesised sub-pipeline containing it: `(fail "canary")` in an
+// operand position parses, and errors only when that operand is actually
+// evaluated. When nothing isolates the mutation — a bare unparenthesised operand,
+// or a template that will not parse — this reports false and the caller must
+// leave the mutant survived. No probe is better than a probe that proves the
+// wrong thing.
+func ProbeSpan(f *File, start, end int) (ps, pe int, ok bool) {
+	ps, pe, ok = EnclosingPipelineSpan(f, start)
+	if !ok {
+		return 0, 0, false
+	}
+	tree, err := ParseTemplate(f)
+	if err != nil {
+		// Without a parse tree we cannot see whether a short circuit guards the
+		// span, so we cannot claim the wide probe is sound.
+		return 0, 0, false
+	}
+
+	var guards []shortCircuitGuard
+	for _, g := range shortCircuitGuards(f, tree) {
+		if g.covers(start, end) {
+			guards = append(guards, g)
+		}
+	}
+	if len(guards) == 0 {
+		return ps, pe, true
+	}
+
+	sub, found := innermostParenPipeline(f, tree, start, end)
+	if !found || sub.start < ps || sub.end > pe {
+		return 0, 0, false
+	}
+	// The narrowed span must sit strictly inside every short circuit guarding the
+	// mutation. Equal spans mean the sub-pipeline *is* the guarded call — probing
+	// it would reproduce the very flaw this function exists to avoid.
+	for _, g := range guards {
+		if !g.call.strictlyCovers(sub) {
+			return 0, 0, false
+		}
+	}
+	return sub.start, sub.end, true
+}
+
+// byteSpan is a half-open byte range into a File.
+type byteSpan struct{ start, end int }
+
+func (s byteSpan) covers(start, end int) bool { return start >= s.start && end <= s.end }
+
+// strictlyCovers reports whether s contains o and is strictly wider.
+func (s byteSpan) strictlyCovers(o byteSpan) bool {
+	return o.start >= s.start && o.end <= s.end && (o.start > s.start || o.end < s.end)
+}
+
+// shortCircuitGuard is one `and`/`or` call: the span of the operands it may skip,
+// plus the span of the whole call those operands belong to.
+type shortCircuitGuard struct {
+	byteSpan // the skippable region: from the end of the first operand to the call's end
+	call     byteSpan
+}
+
+// shortCircuitGuards returns every region of the template that an `and` or `or`
+// may decline to evaluate. They are the only text/template constructs that skip
+// an argument: both stop at the operand that decides the result, so anything from
+// the second operand onward may never run even when the surrounding action does.
+// The first operand is always evaluated once the call is, and so is excluded —
+// otherwise a mutation of the whole condition would lose its probe for no reason.
+func shortCircuitGuards(f *File, t *Tree) []shortCircuitGuard {
+	var out []shortCircuitGuard
+	t.Walk(func(n parse.Node) bool {
+		cmd, ok := n.(*parse.CommandNode)
+		if !ok || isNilNode(cmd) || len(cmd.Args) < 3 {
+			return true // fewer than two operands: nothing can be skipped
+		}
+		id, ok := cmd.Args[0].(*parse.IdentifierNode)
+		if !ok || (id.Ident != "and" && id.Ident != "or") {
+			return true
+		}
+		callStart, callEnd, ok := commandExtent(f, int(id.Position()))
+		if !ok {
+			return true
+		}
+		firstOperand := SkipSpaceForward(f, callStart+len(id.Ident), callEnd)
+		skipFrom, ok := operandEnd(f, firstOperand, callEnd)
+		if !ok {
+			return true
+		}
+		out = append(out, shortCircuitGuard{
+			byteSpan: byteSpan{skipFrom, callEnd},
+			call:     byteSpan{callStart, callEnd},
+		})
+		return true
+	})
+	return out
+}
+
+// innermostParenPipeline returns the content span of the narrowest parenthesised
+// sub-pipeline containing [start,end).
+//
+// A PipeNode in a command's argument list is always a parenthesised
+// sub-pipeline, and unlike FieldNode its position is the true offset of its first
+// token even when that token is a field.
+func innermostParenPipeline(f *File, t *Tree, start, end int) (byteSpan, bool) {
+	var best byteSpan
+	found := false
+	t.Walk(func(n parse.Node) bool {
+		cmd, ok := n.(*parse.CommandNode)
+		if !ok || isNilNode(cmd) {
+			return true
+		}
+		for _, arg := range cmd.Args {
+			pipe, ok := arg.(*parse.PipeNode)
+			if !ok || isNilNode(pipe) {
+				continue
+			}
+			s, e, ok := parenPipelineSpan(f, int(pipe.Position()))
+			if !ok || !(byteSpan{s, e}).covers(start, end) {
+				continue
+			}
+			if !found || e-s < best.end-best.start {
+				best, found = byteSpan{s, e}, true
+			}
+		}
+		return true
+	})
+	return best, found
+}
+
+// parenPipelineSpan returns the content span of the parenthesised sub-pipeline
+// whose first token starts at innerStart: everything up to the matching ")".
+func parenPipelineSpan(f *File, innerStart int) (start, end int, ok bool) {
+	limit, found := ActionInnerEnd(f, innerStart)
+	if !found || innerStart >= limit {
+		return 0, 0, false
+	}
+	end = scanArgList(f, innerStart, limit, false)
+	if end >= limit {
+		return 0, 0, false // no closing ")" inside this action
+	}
+	for end > innerStart && isSpace(f.Bytes[end-1]) {
+		end--
+	}
+	if end <= innerStart {
+		return 0, 0, false
+	}
+	return innerStart, end, true
+}
+
+// commandExtent returns the source span of one command in a pipeline: its first
+// argument through whichever comes first — the ")" closing an enclosing
+// parenthesised sub-pipeline, a "|" at the same nesting depth, or the end of the
+// action. Parse nodes record a start but no extent, so the end comes from a scan
+// over the original bytes.
+func commandExtent(f *File, start int) (int, int, bool) {
+	limit, found := ActionInnerEnd(f, start)
+	if !found || start >= limit {
+		return 0, 0, false
+	}
+	end := scanArgList(f, start, limit, true)
+	for end > start && isSpace(f.Bytes[end-1]) {
+		end--
+	}
+	if end <= start {
+		return 0, 0, false
+	}
+	return start, end, true
+}
+
+// operandEnd returns the offset just past the single command argument starting at
+// from, reporting false for anything it cannot delimit confidently.
+func operandEnd(f *File, from, limit int) (int, bool) {
+	if from >= limit {
+		return 0, false
+	}
+	switch c := f.Bytes[from]; {
+	case c == '(':
+		end := scanArgList(f, from+1, limit, false)
+		if end >= limit {
+			return 0, false
+		}
+		return end + 1, true
+	case c == '"' || c == '\'' || c == '`':
+		j := skipQuoted(f.Bytes, from)
+		if j <= from {
+			return 0, false
+		}
+		return j + 1, true
+	}
+	i := from
+	for i < limit && !isSpace(f.Bytes[i]) && f.Bytes[i] != ')' && f.Bytes[i] != '|' {
+		i++
+	}
+	if i == from {
+		return 0, false
+	}
+	return i, true
+}
+
+// scanArgList walks forward to the end of an argument list: the first ")" not
+// matched by a "(" after from, or a "|" at nesting depth zero when stopAtBar is
+// set, bounded by limit. Quoted strings are skipped so a bracket or bar inside a
+// literal does not end the scan early.
+func scanArgList(f *File, from, limit int, stopAtBar bool) int {
+	depth := 0
+	for i := from; i < limit; i++ {
+		switch f.Bytes[i] {
+		case '"', '\'', '`':
+			if j := skipQuoted(f.Bytes, i); j > i {
+				i = j
+			}
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		case '|':
+			if stopAtBar && depth == 0 {
+				return i
+			}
+		}
+	}
+	return limit
+}

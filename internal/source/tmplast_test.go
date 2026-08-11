@@ -420,3 +420,99 @@ func TestEnclosingPipelineSpanRefusesBareKeywords(t *testing.T) {
 		t.Errorf("else if condition span = %q, want %q", got, ".Values.enabled")
 	}
 }
+
+// TestProbeSpanNarrowsInsideAShortCircuit is the span-level half of the guarantee
+// that an unexercised operand never passes for an unkillable mutant. Go templates
+// short-circuit and/or, so a probe covering more than the mutated operand would
+// error on reaching the action rather than on evaluating the operand, and the
+// difference is exactly "missing test" versus "equivalent mutant".
+func TestProbeSpanNarrowsInsideAShortCircuit(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		// needle locates the mutation span, which is the needle itself.
+		needle string
+		// wantSpan is the source the probe should overwrite, or "" for no probe.
+		wantSpan string
+	}{
+		{
+			"guarded operand narrows to its own sub-pipeline",
+			`{{- if and .Values.a (eq .Values.b "x") }}y{{- end }}`,
+			`"x"`, `eq .Values.b "x"`,
+		},
+		{
+			"guarded operator narrows to its own sub-pipeline",
+			`{{- if and .Values.a (eq .Values.b "x") }}y{{- end }}`,
+			`eq`, `eq .Values.b "x"`,
+		},
+		{
+			"nested short circuit narrows to the innermost sub-pipeline",
+			`{{- if or .Values.a (and .Values.b (ne .Values.c "x")) }}y{{- end }}`,
+			`"x"`, `ne .Values.c "x"`,
+		},
+		{
+			"bare guarded operand has no probe",
+			`{{- if and .Values.a (eq 1 2) }}y{{- end }}`,
+			`(eq 1 2)`, "",
+		},
+		{
+			"sub-pipeline that is itself the guarded call has no probe",
+			`{{- if or .Values.a (and .Values.b 3) }}y{{- end }}`,
+			`3`, "",
+		},
+		{
+			"first operand is always evaluated, so the whole pipeline still works",
+			`{{- if and (eq .Values.b "x") .Values.a }}y{{- end }}`,
+			`"x"`, `and (eq .Values.b "x") .Values.a`,
+		},
+		{
+			"a mutation covering the whole and keeps the whole pipeline",
+			`{{- if and .Values.a .Values.b }}y{{- end }}`,
+			`and .Values.a .Values.b`, `and .Values.a .Values.b`,
+		},
+		{
+			"no short circuit leaves the pipeline span alone",
+			`x: {{ eq .Values.b "x" }}`,
+			`"x"`, `eq .Values.b "x"`,
+		},
+		{
+			"a parenthesised operand outside any short circuit keeps the pipeline",
+			`x: {{ printf "%s" (upper .Values.b) }}`,
+			`.Values.b`, `printf "%s" (upper .Values.b)`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			off := strings.Index(tc.src, tc.needle)
+			if off < 0 {
+				t.Fatalf("needle %q not in source", tc.needle)
+			}
+			start, end, ok := ProbeSpan(f, off, off+len(tc.needle))
+			if tc.wantSpan == "" {
+				if ok {
+					t.Fatalf("want no probe span, got %q", f.Slice(start, end))
+				}
+				return
+			}
+			if !ok {
+				t.Fatal("ProbeSpan returned !ok")
+			}
+			if got := f.Slice(start, end); got != tc.wantSpan {
+				t.Fatalf("probe span = %q, want %q", got, tc.wantSpan)
+			}
+		})
+	}
+}
+
+// TestProbeSpanRefusesUnparseableTemplates keeps the pass conservative: with no
+// parse tree there is no way to know whether a short circuit guards the span, so
+// the wide probe cannot be claimed sound.
+func TestProbeSpanRefusesUnparseableTemplates(t *testing.T) {
+	src := `x: {{ .Values.a }}` + "\n{{ if .Values.b }}no end tag\n"
+	f := mk(t, src)
+	off := strings.Index(src, ".Values.a")
+	if _, _, ok := ProbeSpan(f, off, off+len(".Values.a")); ok {
+		t.Fatal("want !ok when the template does not parse")
+	}
+}

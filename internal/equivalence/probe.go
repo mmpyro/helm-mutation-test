@@ -22,7 +22,10 @@ const Canary = "__helm_mutation_test_canary__"
 // every mutant at that site.
 func ProbeBytes(f *source.File, start, end int) ([]byte, bool) {
 	if f.Kind == source.KindTemplate {
-		ps, pe, ok := source.EnclosingPipelineSpan(f, start)
+		// ProbeSpan, not the enclosing pipeline: a probe wider than the mutation
+		// proves only that the enclosing action was reached, which is a different
+		// claim as soon as an and/or short circuit sits in between.
+		ps, pe, ok := source.ProbeSpan(f, start, end)
 		if !ok {
 			return nil, false
 		}

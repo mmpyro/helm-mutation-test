@@ -1,0 +1,7 @@
+name: app
+
+ingress:
+  # False under every test job, which is the whole point: it makes the
+  # className comparison unreachable without disabling the action around it.
+  enabled: false
+  className: nginx

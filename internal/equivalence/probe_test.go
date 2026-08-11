@@ -197,3 +197,33 @@ func TestProbeBytesRefusesWhatItCannotPerturb(t *testing.T) {
 		t.Fatal("want !ok for a values span with no key to rewrite")
 	}
 }
+
+// TestProbeBytesStaysInsideAShortCircuitedOperand pins the bytes the probe writes
+// for the case that matters most: `and` stops at its first falsey operand, so a
+// probe that replaced the whole pipeline would error on reaching the action and
+// prove nothing about the operand the mutation actually touched.
+func TestProbeBytesStaysInsideAShortCircuitedOperand(t *testing.T) {
+	src := `{{- if and .Values.a (eq .Values.b "x") }}y{{- end }}`
+	f := templateFile(src)
+	off := strings.Index(src, `"x"`)
+	got, ok := ProbeBytes(f, off, off+len(`"x"`))
+	if !ok {
+		t.Fatal("ProbeBytes returned !ok")
+	}
+	want := `{{- if and .Values.a (fail "` + Canary + `") }}y{{- end }}`
+	if string(got) != want {
+		t.Fatalf("probe =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestProbeBytesRefusesABareShortCircuitedOperand: with nothing to isolate the
+// operand, any probe would be wider than the mutation, so there is no probe at
+// all and the mutant must stay Survived.
+func TestProbeBytesRefusesABareShortCircuitedOperand(t *testing.T) {
+	src := `{{- if or .Values.a .Values.b }}y{{- end }}`
+	f := templateFile(src)
+	off := strings.Index(src, ".Values.b")
+	if _, ok := ProbeBytes(f, off, off+len(".Values.b")); ok {
+		t.Fatal("want !ok: a bare operand of a short circuit cannot be probed in isolation")
+	}
+}

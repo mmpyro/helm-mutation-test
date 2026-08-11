@@ -1,0 +1,12 @@
+apiVersion: v2
+name: shortcircuit
+description: |
+  A minimal chart whose only interesting line hides an expression behind an
+  and/or short circuit. It exists so the equivalence pass can be tested against
+  the case where the enclosing action runs but the mutated operand does not:
+  ingress.enabled is false and no test job enables it, so the eq never
+  evaluates. Mutants inside that eq are killable — by an assertion this chart's
+  suite deliberately lacks — and must therefore stay Survived, never Equivalent.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

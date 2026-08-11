@@ -1,0 +1,15 @@
+suite: configmap
+templates:
+  - templates/configmap.yaml
+tests:
+  # Deliberately no job sets ingress.enabled, so the className comparison is
+  # never evaluated. Adding such a job kills the mutants inside it, which is
+  # exactly why they must be reported as survivors rather than excluded.
+  - it: renders the always-present keys
+    asserts:
+      - equal:
+          path: metadata.name
+          value: app
+      - equal:
+          path: data.static
+          value: always

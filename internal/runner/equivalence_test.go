@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmpyro/helm-mutation-test/internal/config"
 	"github.com/mmpyro/helm-mutation-test/internal/model"
 	"github.com/mmpyro/helm-mutation-test/internal/source"
 )
@@ -217,5 +218,77 @@ tests:
 	}
 	if mutants[0].Detail == mutants[1].Detail {
 		t.Fatal("the two skip reasons must be distinguishable")
+	}
+}
+
+// shortCircuitFixture copies the short-circuit chart into a temp dir. It is a
+// chart of its own rather than another template in testdata/charts/sample so
+// that adding it does not move the fixture's scores.
+func shortCircuitFixture(t *testing.T) string {
+	t.Helper()
+	src, err := filepath.Abs("../../testdata/charts/shortcircuit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "shortcircuit")
+	if err := copyTree(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
+// TestShortCircuitedOperandIsNotJudgedEquivalent guards the line between "no test
+// reaches this" and "no test can catch this", at the one place the two are easiest
+// to confuse.
+//
+// The chart's only branch is `{{- if and .Values.ingress.enabled (eq
+// .Values.ingress.className "nginx") }}`, with ingress.enabled false under every
+// covering job. Go templates short-circuit `and`, so the `eq` never evaluates and
+// mutating it changes nothing — but an assertion that enables the branch kills
+// those mutants outright, so they are missing tests, not unkillable mutants.
+//
+// A probe over the whole `and ...` pipeline errors regardless (it is reached), and
+// reading that as proof of execution promoted both of them to Equivalent, deleting
+// two real findings and raising the score. The probe must cover no more than the
+// mutated operand.
+func TestShortCircuitedOperandIsNotJudgedEquivalent(t *testing.T) {
+	dir := shortCircuitFixture(t)
+	cfg := config.Defaults()
+	cfg.ChartPath = dir
+	cfg.TestFiles = []string{"tests/configmap_test.yaml"}
+	cfg.Parallel = 4
+	run := runSession(t, cfg)
+
+	f, err := source.Load(
+		filepath.Join(dir, "templates/configmap.yaml"), "templates/configmap.yaml", source.KindTemplate)
+	if err != nil {
+		t.Fatalf("source.Load: %v", err)
+	}
+	guarded := `(eq .Values.ingress.className "nginx")`
+	lo := strings.Index(f.Text(), guarded)
+	if lo < 0 {
+		t.Fatalf("fixture no longer contains %s; update this test", guarded)
+	}
+	hi := lo + len(guarded)
+
+	var inside int
+	for _, m := range run.Mutants {
+		if m.File != "templates/configmap.yaml" || m.StartByte < lo || m.EndByte > hi {
+			continue
+		}
+		inside++
+		if m.Status != model.StatusEquivalent {
+			continue
+		}
+		t.Errorf("%s at %d:%d (%q -> %q) was judged equivalent, but enabling the branch kills it: %s",
+			m.Mutator, m.StartByte, m.EndByte, m.Original, m.Mutated, m.Detail)
+	}
+	if inside < 2 {
+		t.Fatalf("expected mutants inside the short-circuited operand, found %d", inside)
+	}
+	// Without this the test would also pass with equivalence detection switched
+	// off entirely, which is not the property being protected.
+	if run.Tally.Equivalent == 0 {
+		t.Error("the pass proved nothing equivalent anywhere in this chart, so it was not really exercised")
 	}
 }
