@@ -1199,11 +1199,13 @@ against [`testdata/charts/rangeloop`](#range-empty) instead. A mutator that gene
 worth naming as a status that scored nothing — a blank row would read as "ran and found no weakness".
 ```
 
-`docs/mutators.md:29` — "**six of the eight mutators score 0.0% against it**" is a claim about the mutators that actually fire on `sample`. Reword so the count stays true:
+`docs/mutators.md:29` — "**six of the eight mutators score 0.0% against it**" is a claim about the mutators that actually fire on `sample`, so "six of the nine" would be false: `range-empty` fires zero times there. Drop the total rather than restate it, which keeps the informative count (`six`) and lets Step 5's `grep` check stand:
 
 ```markdown
-headline: **six of the eight mutators that fire on this chart score 0.0% against it**, because a suite
+headline: **six of the mutators that fire on this chart score 0.0% against it**, because a suite
 ```
+
+The word "eight" must not survive anywhere in `README.md`, `docs/` or `CLAUDE.md` after this task.
 
 `docs/README.md:16` — "All eight mutators, with a real before/after" → "All nine mutators, …".
 
