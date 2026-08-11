@@ -1,8 +1,6 @@
 # CLAUDE.md
 
-Guidance for working in this repository. See `README.md` for what the tool does and
-`docs/superpowers/specs/` for the design record.
-
+Guidance for working in this repository. See `README.md` for what the tool does.
 ## What this is
 
 A Helm plugin that mutates a chart's templates and `values.yaml`, re-runs the chart's
