@@ -381,3 +381,42 @@ func TestEnclosingPipelineSpanRefusesPlainText(t *testing.T) {
 		t.Fatal("want !ok for an offset outside any action")
 	}
 }
+
+func TestEnclosingPipelineSpanRefusesBareKeywords(t *testing.T) {
+	// A bare block keyword (else, end, break, continue) has no pipeline to probe.
+	// Overwriting it with `fail "canary"` would orphan the block structure and
+	// produce a parse error, which happens whether or not the code path runs and
+	// therefore proves nothing about execution. Detecting equivalence requires proof
+	// that the span was actually evaluated — a probe that errors unconditionally
+	// proves nothing.
+	tests := []struct {
+		name   string
+		src    string
+		needle string
+	}{
+		{"else keyword", "{{- if .A }}\n{{ .B }}\n{{- else }}\n{{ .C }}\n{{- end }}", "else }}"},
+		{"end keyword", "{{- if .A }}{{ .B }}{{- end }}", "end }}"},
+		{"end trimmed", "{{- if .A }}{{ .B }}{{- end -}}", "end -}}"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mk(t, tc.src)
+			off := strings.Index(tc.src, tc.needle)
+			if off < 0 {
+				t.Fatalf("needle %q not in source", tc.needle)
+			}
+			if _, _, ok := EnclosingPipelineSpan(f, off); ok {
+				t.Fatalf("EnclosingPipelineSpan should return !ok for a bare keyword")
+			}
+		})
+	}
+
+	// Verify that else if with a condition still returns the condition span.
+	f := mk(t, "{{- if .A }}\n{{ .B }}\n{{- else if .Values.enabled }}\n{{ .C }}\n{{- end }}")
+	off := strings.Index(f.Text(), ".Values.enabled")
+	if start, end, ok := EnclosingPipelineSpan(f, off); !ok {
+		t.Fatal("EnclosingPipelineSpan should work for else if with a condition")
+	} else if got := f.Slice(start, end); got != ".Values.enabled" {
+		t.Errorf("else if condition span = %q, want %q", got, ".Values.enabled")
+	}
+}

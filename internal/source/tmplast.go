@@ -475,8 +475,20 @@ func EnclosingPipelineSpan(f *File, offset int) (start, end int, ok bool) {
 	for end > start && isSpace(f.Bytes[end-1]) {
 		end--
 	}
-	if end <= start {
+	if start >= end {
 		return 0, 0, false
 	}
-	return start, end, true
+
+	// Bare block keywords (else, end, break, continue) have no pipeline to probe.
+	// Overwriting them would orphan the block structure, yielding a parse error
+	// that proves nothing about execution. Detect a single bare keyword by checking
+	// if the remaining content is an identifier.
+	for i := start; i < end; i++ {
+		c := f.Bytes[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return start, end, true
+		}
+	}
+	// Content is a single identifier: a bare keyword with no arguments.
+	return 0, 0, false
 }
