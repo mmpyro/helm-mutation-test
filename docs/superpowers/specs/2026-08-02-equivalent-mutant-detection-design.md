@@ -124,8 +124,15 @@ Both load-bearing boundaries in CLAUDE.md survive: helm-unittest imports stay in
 ### Contexts
 
 For a given survivor, the contexts are the test jobs of its **covering suites**, with
-skipped jobs excluded. Not every job in the chart: the covering set is exactly what
-ran, so it is exactly what "no test noticed" refers to.
+skipped jobs excluded. Not every job in the chart: the covering set is what ran, so it
+is what "no test noticed" refers to.
+
+Coverage is tracked at suite **file** granularity (`Mutant.CoveringSuites`), not per
+`suite:` document, so a file holding several suites contributes every job in all of
+them, not only the jobs of the suite that actually renders the mutated template. That
+is coarser than "exactly what ran," but it errs in the safe direction: extra contexts
+can only make an `Equivalent` verdict harder to earn, never easier, since every
+context added is one more chance for a difference to show up.
 
 Each `RenderContext` is reconstructed from exported fields on
 `unittest.TestSuite` and `unittest.TestJob` — `Values`, `Set`, `Release`, `Chart`,
