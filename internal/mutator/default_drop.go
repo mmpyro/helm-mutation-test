@@ -19,7 +19,7 @@ type defaultDrop struct{}
 func (defaultDrop) ID() string { return IDDefaultDrop }
 
 func (defaultDrop) Describe() string {
-	return "remove `| default X` from a pipeline, exposing untested fallbacks"
+	return "remove a '| default X' pipeline segment, exposing untested fallbacks"
 }
 
 func (defaultDrop) Mutate(f *source.File) []Candidate {

@@ -19,7 +19,7 @@ type requiredDrop struct{}
 func (requiredDrop) ID() string { return IDRequiredDrop }
 
 func (requiredDrop) Describe() string {
-	return "strip `required \"msg\" X` to X, exposing missing failure-path tests"
+	return "strip a 'required' guard to its value, exposing missing failure-path tests"
 }
 
 func (requiredDrop) Mutate(f *source.File) []Candidate {

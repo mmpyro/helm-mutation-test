@@ -1,0 +1,8 @@
+name: "mutation-test"
+version: "0.1.0"
+usage: "mutation testing for helm-unittest suites"
+description: "Measure how much your helm-unittest suites actually assert, by mutating the chart and checking whether the tests notice."
+command: "$HELM_PLUGIN_DIR/bin/helm-mutation-test"
+hooks:
+  install: "cd $HELM_PLUGIN_DIR; ./install-binary.sh"
+  update: "cd $HELM_PLUGIN_DIR; ./install-binary.sh"

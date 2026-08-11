@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      # The tool measured against its own fixture chart. The weak suite must score
+      # badly and the strong one well; if either drifts, a mutator has regressed.
+      - name: Build
+        run: make build
+
+      - name: Fixture chart scores as expected
+        run: |
+          set -eu
+          bin/helm-mutation-test -f 'tests/strong_test.yaml' testdata/charts/sample \
+            --threshold 70 --report console,markdown,json --report-dir mutation-strong
+          # The weak suite must FAIL a high threshold; that is the point of it.
+          if bin/helm-mutation-test -f 'tests/weak_test.yaml' testdata/charts/sample \
+               --threshold 50 --report console >/dev/null 2>&1; then
+            echo "::error::the deliberately weak suite scored above 50%, so a mutator has regressed"
+            exit 1
+          fi
+          echo "weak suite correctly scored below 50%"
+
+      - name: Publish the mutation report to the job summary
+        if: always()
+        run: cat mutation-strong/mutation-report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: mutation-strong/

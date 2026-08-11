@@ -167,10 +167,16 @@ func (f *File) Apply(start, end int, replacement string) []byte {
 }
 
 // MutatedLine renders the line containing start as it would read after the edit.
-// When the edit spans multiple lines the result is joined with "\n" so reports
-// can still show something meaningful.
+//
+// A whole-line deletion returns "": the line is gone, and there is no "after"
+// text to show. Naively splicing prefix and suffix in that case would join the
+// deleted line's indentation to the *following* line, producing a diff that looks
+// like the mutation replaced one field with the next one down.
 func (f *File) MutatedLine(start, end int, replacement string) string {
 	start, end = f.clamp(start, end)
+	if replacement == "" && f.isWholeLineSpan(start, end) {
+		return ""
+	}
 	startLine, _ := f.Position(start)
 	endLine, _ := f.Position(end)
 
@@ -188,6 +194,29 @@ func (f *File) MutatedLine(start, end int, replacement string) string {
 		suffix = string(f.Bytes[end:lineEnd])
 	}
 	return strings.TrimRight(prefix+replacement+suffix, "\r")
+}
+
+// isWholeLineSpan reports whether [start,end) covers one or more entire lines:
+// it begins at a line start and ends at a line start or at end of file.
+func (f *File) isWholeLineSpan(start, end int) bool {
+	if end <= start {
+		return false
+	}
+	atLineStart := start == 0 || (start <= len(f.Bytes) && f.Bytes[start-1] == '\n')
+	endsLine := end == len(f.Bytes) || f.Bytes[end-1] == '\n'
+	return atLineStart && endsLine
+}
+
+// DeletedLineCount is how many source lines a span covers, for reports that need
+// to say "3 lines removed" rather than showing only the first.
+func (f *File) DeletedLineCount(start, end int) int {
+	start, end = f.clamp(start, end)
+	if end <= start {
+		return 0
+	}
+	startLine, _ := f.Position(start)
+	endLine, _ := f.Position(end - 1)
+	return endLine - startLine + 1
 }
 
 func (f *File) clamp(start, end int) (int, int) {

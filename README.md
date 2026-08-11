@@ -1,0 +1,215 @@
+# helm-mutation-test
+
+A Helm plugin that measures how much your [helm-unittest](https://github.com/helm-unittest/helm-unittest)
+suites actually assert.
+
+`helm unittest` tells you whether your chart tests **pass**. It cannot tell you whether they are
+**worth anything**. This suite is green, and always will be:
+
+```yaml
+tests:
+  - it: renders a Deployment
+    asserts:
+      - isKind:
+          of: Deployment
+```
+
+Meanwhile the chart can regress `replicas`, lose `imagePullPolicy`, or stop rendering its whole
+`{{- if .Values.ingress.enabled }}` block, and nothing turns red.
+
+This plugin breaks the chart on purpose — one small change at a time — and re-runs your existing
+suites against each one. A change that no test objects to is a **survived mutant**: a precise,
+actionable pointer at a missing assertion.
+
+## The fixture chart, as a demonstration
+
+`testdata/charts/sample` ships two suites over the same templates. Both pass. `helm unittest` reports
+them as equally green:
+
+```console
+$ helm unittest -f 'tests/weak_test.yaml'   testdata/charts/sample   # PASS, 4 tests
+$ helm unittest -f 'tests/strong_test.yaml' testdata/charts/sample   # PASS, 14 tests
+```
+
+Mutation testing separates them:
+
+| suite | score | killed | survived | invalid |
+|---|---:|---:|---:|---:|
+| `weak_test.yaml` | **6.6%** | 7 | 99 | 4 |
+| `strong_test.yaml` | **74.4%** | 96 | 33 | 5 |
+
+Run `make demo` to reproduce both.
+
+## Install
+
+```console
+helm plugin install https://github.com/mmpyro/helm-mutation-test
+```
+
+Requires the Go toolchain (the plugin builds from source on install) and `helm-unittest`-style test
+suites in the chart. Tested against helm-unittest v1.0.3.
+
+From a checkout:
+
+```console
+make install
+```
+
+## Usage
+
+```console
+helm mutation-test ./my-chart
+```
+
+```console
+# Fail CI below 70%, and write reports the job can publish
+helm mutation-test ./my-chart --threshold 70 \
+  --report console,markdown,html,junit --report-dir ./mutation
+
+# A fast subset while iterating on tests
+helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
+```
+
+### Reading the output
+
+```
+Mutation testing sample  (1 suite, 4 tests, baseline 1ms)
+
+  Score    6.6%  ██░░░░░░░░░░░░░░░░░░░░░░░░   (7 killed / 99 survived)
+  not scored: 24 no-coverage · 4 invalid
+
+  By mutator                          killed  survived    score
+    cond-negate                            0         3    0.0%
+    num-literal                            0        12    0.0%
+    ...
+
+  SURVIVED (99)
+
+  templates/deployment.yaml:8  num-literal
+    -   replicas: {{ .Values.replicaCount }}
+    +   replicas: 3
+    ran 4 tests in tests/weak_test.yaml — all passed
+```
+
+Each survivor is a concrete instruction: add an assertion that would tell those two lines apart.
+
+### Exit codes
+
+| code | meaning |
+|---|---|
+| `0` | ran successfully (and met `--threshold`, if set) |
+| `1` | the mutation score is below `--threshold` |
+| `2` | could not run — most often the chart's own tests do not pass |
+
+The last case is deliberate. A mutation score measured against a failing suite is meaningless, so a
+red baseline is a hard stop rather than a warning.
+
+## Mutators
+
+| ID | Mutation |
+|---|---|
+| `cond-negate` | Negate `if` / `else if` / `with` conditions: `COND` → `not (COND)` |
+| `bool-flip` | `true` ↔ `false` |
+| `num-literal` | Perturb numbers: `n` → `n+1`, and `n` → `0` |
+| `str-literal` | Replace a string with a sentinel |
+| `yaml-key-delete` | Delete a key and its nested block |
+| `default-drop` | Remove a `\| default X` pipeline segment |
+| `comparison-swap` | `eq`↔`ne`, `lt`↔`ge`, `gt`↔`le`, `and`↔`or` |
+| `required-drop` | Strip a `required` guard down to its value |
+
+Templates (including `_helpers.tpl` partials) and `values.yaml` are both mutated. Test files never
+are — mutating the tests would measure nothing about the chart.
+
+## What the score does and does not count
+
+```
+score = killed / (killed + survived)
+```
+
+Only those two outcomes grade your assertions. Everything else is reported separately, because
+folding it in would flatter the number:
+
+| status | why it is excluded |
+|---|---|
+| **No coverage** | No suite renders the mutated template, so no test ever had the chance to catch it. This is a finding in its own right. |
+| **Invalid** | The mutation stopped the chart rendering, so *every* test "caught" it regardless of what it asserts. That grades nothing. A high invalid rate is a bug in this tool, not in your suite. |
+| **Timeout** | Evaluation exceeded the per-mutant timeout. |
+| **Error** | The tool itself failed on that mutant. |
+
+`--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
+coverage.
+
+## Reports
+
+`--report` accepts any combination of:
+
+- **console** *(default)* — score, per-mutator and per-file breakdowns, then every survivor as a diff
+  at a `file:line`.
+- **json** — the canonical machine-readable model: every mutant, with which assertion in which test
+  killed it. Parse this if you want to build something on top.
+- **html** — a self-contained page. Renders the interactive
+  [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements) viewer
+  for annotated source, and carries a plain-HTML summary so the page still says something useful when
+  opened out of a CI artifact with no network. Also writes the standard-schema JSON alongside.
+- **markdown** — sized for `$GITHUB_STEP_SUMMARY` or a PR comment.
+- **junit** — one `testcase` per mutant. **Survived becomes a `failure`**, since a survivor is the
+  defect worth failing a build over; killed mutants pass, and the non-grading statuses are skipped.
+
+## How it works
+
+```
+discover → baseline → coverage index → generate mutants → evaluate (workers) → report
+```
+
+**Mutations are located with a parser but applied as byte edits.** Templates are parsed with Go's
+`text/template/parse` (using `SkipFuncCheck`, so no sprig or Helm funcmap is needed) and `values.yaml`
+with `yaml.v3` node positions. The edit then replaces an exact byte range in the original file, so
+formatting — including Helm's whitespace-sensitive `{{-` trim markers — survives untouched.
+
+**Suites are selected by coverage.** helm-unittest suites declare which templates they render, so a
+mutant in `ingress.yaml` only runs the suites that render `ingress.yaml`. That is both faster and more
+honest: it turns "no suite renders this template at all" into a reportable finding instead of a
+survivor.
+
+**Kill attribution comes from driving `TestSuite.RunV3` directly** rather than helm-unittest's
+top-level runner, which returns only a bool and prints. The lower-level call returns the full result
+tree, which is what lets the tool name the exact assertion that caught each mutation — and distinguish
+a failed assertion (a real kill) from a render error (which every test "catches", and so grades
+nothing).
+
+### Why workers are separate processes
+
+helm-unittest cannot safely render concurrently within one process. `TestJob.capabilitiesV3` does:
+
+```go
+capabilities := v3util.DefaultCapabilities   // a *Capabilities POINTER
+capabilities.KubeVersion = ...               // writes through the shared pointer
+```
+
+`chartutil.DefaultCapabilities` is a package-level pointer in Helm, so every test job mutates
+process-global state. That is a data race, and a correctness bug too: a suite declaring a custom
+`capabilities.majorVersion` leaks that version into suites rendering concurrently. The same code is
+present in the latest release (v1.1.2), so upgrading is not a fix.
+
+Each worker therefore runs in its own process, where that global is private. Workers are long-lived
+and stream jobs, so process startup is paid once per worker rather than once per mutant. A single
+worker (`-p 1`) still runs in-process, where no concurrency exists. `-p 1` and `-p 8` are verified to
+produce identical results.
+
+## Development
+
+```console
+make test    # full suite with -race
+make lint
+make demo    # score the fixture chart with both suites
+```
+
+Design notes live in [`docs/superpowers/specs`](docs/superpowers/specs).
+
+## Known limits
+
+- Test suites must be discoverable by `-f`; charts nesting suites in subdirectories need an explicit
+  glob (`-f 'tests/**/*_test.yaml'`).
+- A suite file that fails to parse aborts the run, matching helm-unittest's own behaviour.
+- Mutation is one change at a time; no higher-order mutants.
+- No incremental mode yet: every run evaluates the full mutant set unless `--max-mutants` is given.
