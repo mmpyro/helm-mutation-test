@@ -47,10 +47,10 @@ func mustRun(t *testing.T, id string, f *source.File) []Candidate {
 
 // ---------- registry ----------
 
-func TestRegistryHasAllEightMutators(t *testing.T) {
+func TestRegistryHasAllNineMutators(t *testing.T) {
 	want := []string{
 		IDBoolFlip, IDComparisonSwap, IDCondNegate, IDDefaultDrop,
-		IDNumLiteral, IDRequiredDrop, IDStrLiteral, IDYAMLKeyDelete,
+		IDNumLiteral, IDRangeEmpty, IDRequiredDrop, IDStrLiteral, IDYAMLKeyDelete,
 	}
 	got := IDs()
 	if len(got) != len(want) {
@@ -232,6 +232,114 @@ func TestCondNegatePreservesTrimMarkers(t *testing.T) {
 	out := applied(f, got)[0]
 	if !strings.HasPrefix(out, "{{- if not (.Values.a) -}}") {
 		t.Errorf("trim markers were not preserved: %q", out)
+	}
+}
+
+// ---------- range-empty ----------
+
+func TestRangeEmpty(t *testing.T) {
+	tests := []struct {
+		name, src, wantSpan, want string
+	}{
+		{
+			"plain range",
+			"{{- range .Values.ports }}\n- {{ . }}\n{{- end }}",
+			".Values.ports",
+			"{{- range list }}\n- {{ . }}\n{{- end }}",
+		},
+		{
+			"one declaration survives",
+			"{{- range $v := .Values.ports }}\n- {{ $v }}\n{{- end }}",
+			".Values.ports",
+			"{{- range $v := list }}\n- {{ $v }}\n{{- end }}",
+		},
+		{
+			"two declarations survive",
+			"{{- range $k, $v := .Values.labels }}\n{{ $k }}: {{ $v }}\n{{- end }}",
+			".Values.labels",
+			"{{- range $k, $v := list }}\n{{ $k }}: {{ $v }}\n{{- end }}",
+		},
+		{
+			"whole piped expression is replaced",
+			"{{- range .Values.x | sortAlpha }}\n- {{ . }}\n{{- end }}",
+			".Values.x | sortAlpha",
+			"{{- range list }}\n- {{ . }}\n{{- end }}",
+		},
+		{
+			// An {{else}} makes the mutant render the else branch rather than
+			// nothing. Still a manifest change, so still a useful mutant.
+			"range with else",
+			"{{ range .Values.p }}a{{ else }}b{{ end }}",
+			".Values.p",
+			"{{ range list }}a{{ else }}b{{ end }}",
+		},
+		{
+			// _helpers.tpl is nothing but define blocks; missing them would mean
+			// missing all of a chart's helper logic.
+			"inside a define block",
+			`{{ define "c.x" }}{{- range $i, $e := .Values.l }}{{ $e }}{{- end }}{{ end }}`,
+			".Values.l",
+			`{{ define "c.x" }}{{- range $i, $e := list }}{{ $e }}{{- end }}{{ end }}`,
+		},
+		{
+			// A ":=" inside a string literal is not a declaration.
+			"assignment inside a string literal",
+			"{{- range .Values.x | replace \":=\" \"-\" }}\n- {{ . }}\n{{- end }}",
+			`.Values.x | replace ":=" "-"`,
+			"{{- range list }}\n- {{ . }}\n{{- end }}",
+		},
+		{
+			// Here the "$" begins the expression rather than a declaration.
+			"range over a declared variable",
+			"{{- $items := .Values.x }}\n{{- range $items }}\n- {{ . }}\n{{- end }}",
+			"$items",
+			"{{- $items := .Values.x }}\n{{- range list }}\n- {{ . }}\n{{- end }}",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tmpl(tc.src)
+			got := mustRun(t, IDRangeEmpty, f)
+			if len(got) != 1 {
+				t.Fatalf("got %d candidates, want 1: %v", len(got), spans(f, got))
+			}
+			if s := spans(f, got)[0]; s != tc.wantSpan {
+				t.Fatalf("replaced span = %q, want %q", s, tc.wantSpan)
+			}
+			if a := applied(f, got)[0]; a != tc.want {
+				t.Fatalf("mutant =\n%q\nwant\n%q", a, tc.want)
+			}
+		})
+	}
+}
+
+// TestRangeEmptyProducesNoCandidateForAnAlreadyEmptyRange: a candidate whose
+// replacement equals the original can only ever "survive", inflating the
+// survived count with a non-mutation.
+func TestRangeEmptyProducesNoCandidateForAnAlreadyEmptyRange(t *testing.T) {
+	f := tmpl("{{- range list }}\n- {{ . }}\n{{- end }}")
+	if got := mustRun(t, IDRangeEmpty, f); len(got) != 0 {
+		t.Fatalf("got %d candidates, want 0: %v", len(got), spans(f, got))
+	}
+}
+
+// TestRangeEmptyMutantsParseWithDeclarations is the property that made this
+// mutator non-trivial. RangeNode's Pipe.Position() is the offset of "$k", so the
+// obvious whole-pipeline replacement leaves $k and $v undeclared and the mutant
+// fails to parse — making it Invalid, which grades nothing at all.
+func TestRangeEmptyMutantsParseWithDeclarations(t *testing.T) {
+	srcs := []string{
+		"{{- range $v := .Values.ports }}\n- {{ $v }}\n{{- end }}",
+		"{{- range $k, $v := .Values.labels }}\n{{ $k }}: {{ $v }}\n{{- end }}",
+	}
+	for _, src := range srcs {
+		f := tmpl(src)
+		for _, c := range mustRun(t, IDRangeEmpty, f) {
+			mutated := f.Apply(c.Start, c.End, c.Replacement)
+			if _, err := source.ParseTemplate(tmpl(string(mutated))); err != nil {
+				t.Errorf("mutant does not parse: %v\n%s", err, mutated)
+			}
+		}
 	}
 }
 
