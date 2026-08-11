@@ -1,7 +1,7 @@
 apiVersion: v2
 name: rangeloop
 description: |
-  A minimal chart whose only interesting content is three range loops. It exists
+  A minimal chart whose only interesting content is four range loops. It exists
   so range-empty has end-to-end evidence without adding a template to
   testdata/charts/sample, whose mutant count and scores are quoted throughout
   README.md and docs/.
@@ -11,6 +11,11 @@ description: |
   "$k, $v :=": the declaration case, which must survive both the mutation and
   the equivalence probe. extras is empty under every test job, so forcing its
   loop to zero iterations provably changes nothing and is correctly Equivalent.
+  extraLabels is also empty under every test job, but additionally
+  declaration-carrying ("$k, $v :="), so its Equivalent verdict is reachable
+  only if the probe rewrite preserves the declarations and
+  "range $k, $v := fail \"canary\"" still parses — the end-to-end proof of the
+  probe-declaration fix, which the extras loop alone cannot provide.
 type: application
 version: 0.1.0
 appVersion: "1.0.0"

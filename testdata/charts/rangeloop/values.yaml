@@ -12,3 +12,10 @@ labels:
 # cannot change what renders, so range-empty on it is genuinely Equivalent
 # rather than a survivor blaming the tests.
 extras: []
+
+# Empty under every test job, and declaration-carrying ("$k, $v :="), unlike
+# extras above. Its Equivalent verdict is reachable only if the probe
+# rewrite preserves the $k, $v declarations so that
+# {{- range $k, $v := fail "canary" }} still parses — the end-to-end proof
+# that the probe-declaration fix works, not just a second empty loop.
+extraLabels: {}

@@ -47,8 +47,8 @@ func ProbeBytes(f *source.File, start, end int) ([]byte, bool) {
 // leaves the mutant Survived and counted in Run.EquivalenceUnchecked, which is
 // the direction the burden of proof requires.
 //
-// Cost is one parse per span, not per mutant: Checker.probed caches by span key,
-// and a parse is negligible against a chart render.
+// Cost is one parse per span, not per mutant: Checker.probed caches the verdict
+// per span and context set, and a parse is negligible against a chart render.
 func probeParses(f *source.File, probed []byte) bool {
 	_, err := source.ParseTemplate(source.New(probed, f.AbsPath, f.Path, f.Kind))
 	return err == nil

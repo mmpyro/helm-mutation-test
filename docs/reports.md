@@ -253,7 +253,7 @@ internal model, so refactors do not silently change the published format.
   "capped": 0,
   "mutators": [
     "bool-flip", "comparison-swap", "cond-negate", "default-drop",
-    "num-literal", "required-drop", "str-literal", "yaml-key-delete"
+    "num-literal", "range-empty", "required-drop", "str-literal", "yaml-key-delete"
   ],
   "suites": [
     {

@@ -210,15 +210,36 @@ saying *why* the property matters when it is not obvious. Keep that style.
 - **`testdata/charts/shortcircuit` and `testdata/charts/rangeloop` are separate
   fixtures, deliberately.** The first exists only to exercise the
   short-circuited-operand case above. The second exercises `range`, which `sample`
-  contains none of: three loops — a list and a map that separate a weak suite from a
-  strong one, and an `extras: []` loop whose mutant is genuinely `Equivalent`. Pinned
-  by `TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne` and
+  contains none of: four loops — a list and a map that separate a weak suite from a
+  strong one, and two empty loops (`extras: []` and, declaration-carrying,
+  `extraLabels: {}`) whose mutants are genuinely `Equivalent`. The declaration-carrying
+  one is also the end-to-end proof that the equivalence probe preserves `$k, $v :=`
+  declarations — see the probe-declaration gotcha below. Pinned by
+  `TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne` and
   `TestEmptyRangeIsJudgedEquivalent`. Keep new single-purpose fixtures out of
   `sample`: adding a template there changes the measured scores quoted in
   `README.md`, `docs/` and the pinned session tests.
 - `internal/runner/baseline_test.go`'s `TestMain` doubles as the worker entry point
   so tests exercise the real subprocess protocol rather than a stand-in. Do not
   remove `SetWorkerArgs`.
+
+### Checklist: adding a mutator
+
+The mutator ID list is enumerated in more places than the code makes obvious, and it has
+drifted twice — most recently when `range-empty` shipped and four separate lists still said
+"eight". Searching for the spelled-out count (`grep -rn "eight"`) does not catch it: the
+enumerations are prose, quoted CLI output, a JSON sample and an integration test, not the
+word itself. Use the binary as the oracle instead:
+
+```console
+./bin/helm-mutation-test x --mutators zz 2>&1   # prints the canonical ID list
+grep -rn "yaml-key-delete" README.md docs/ test/   # every hit that is a LIST of IDs must include the new one
+```
+
+Check every hit that is a *list* of mutator IDs, not every hit of the word: as of `range-empty`
+that meant `README.md`'s mutators table, `docs/cli-reference.md`'s prose list and two quoted
+error messages, `docs/reports.md`'s JSON sample, and
+`test/integration/exitcodes_test.go`'s `TestAMisspelledMutatorListsTheValidOnes`.
 
 ## Out of scope for now
 

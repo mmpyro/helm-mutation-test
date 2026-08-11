@@ -621,6 +621,9 @@ func TestCutDeclarations(t *testing.T) {
 		// A ":=" inside a string literal must never be read as a declaration; the
 		// scan stops at the first byte that cannot appear in one, which is the ".".
 		{"assignment inside a string literal", `.Values.x | replace ":=" "-"`, `.Values.x | replace ":=" "-"`, false},
+		// Starts with "$", unlike the case above, so this pins that the scanner
+		// keeps going through the string literal instead of stopping at byte 0.
+		{"a variable then a string-literal assignment", `$items | replace ":=" "-"`, `$items | replace ":=" "-"`, false},
 		{"declaration with nothing after it", "$x :=", "$x :=", false},
 	}
 	for _, tc := range tests {

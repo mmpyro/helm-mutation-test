@@ -119,6 +119,7 @@ red baseline is a hard stop rather than a warning.
 | `cond-negate` | Negate `if` / `else if` / `with` conditions: `COND` → `not (COND)` |
 | `bool-flip` | `true` ↔ `false` |
 | `num-literal` | Perturb numbers: `n` → `n+1`, and `n` → `0` |
+| `range-empty` | Force a `range` loop to iterate zero times: `range X` → `range list` |
 | `str-literal` | Replace a string with a sentinel |
 | `yaml-key-delete` | Delete a key and its nested block |
 | `default-drop` | Remove a `\| default X` pipeline segment |

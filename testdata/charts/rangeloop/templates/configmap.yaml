@@ -13,3 +13,6 @@ data:
   {{- range .Values.extras }}
   extra-{{ . }}: "yes"
   {{- end }}
+  {{- range $k, $v := .Values.extraLabels }}
+  extra-label-{{ $k }}: {{ $v | quote }}
+  {{- end }}

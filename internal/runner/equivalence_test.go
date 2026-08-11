@@ -353,12 +353,16 @@ func TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne(t *testing.T) {
 		t.Errorf("the weak suite killed %d range mutants; it asserts nothing any loop produces",
 			weak[model.StatusKilled])
 	}
-	if weak[model.StatusSurvived] < 2 {
-		t.Errorf("the weak suite left %d range survivors, want at least 2 (ports and labels)",
+	if weak[model.StatusSurvived] != 2 {
+		t.Errorf("the weak suite left %d range survivors, want exactly 2 (ports and labels)",
 			weak[model.StatusSurvived])
 	}
-	if strong[model.StatusKilled] < 2 {
-		t.Errorf("the strong suite killed %d range mutants, want at least 2 (ports and labels): %v",
+	if weak[model.StatusEquivalent] != 2 {
+		t.Errorf("the weak suite found %d range equivalents, want exactly 2 (extras and extraLabels)",
+			weak[model.StatusEquivalent])
+	}
+	if strong[model.StatusKilled] != 2 {
+		t.Errorf("the strong suite killed %d range mutants, want exactly 2 (ports and labels): %v",
 			strong[model.StatusKilled], strong)
 	}
 	if strong[model.StatusSurvived] != 0 {
@@ -366,20 +370,23 @@ func TestRangeMutantSurvivesAWeakSuiteAndIsKilledByAStrongOne(t *testing.T) {
 	}
 }
 
-// TestEmptyRangeIsJudgedEquivalent: extras is empty under every covering context,
-// so forcing its loop to zero iterations cannot change any rendered manifest and
-// no assertion could ever catch it. range evaluates its pipeline even when the
-// result is empty, so the probe legitimately proves execution and the verdict is
-// Equivalent — excluded from the score and named in the report, not hidden.
+// TestEmptyRangeIsJudgedEquivalent: extras and extraLabels are both empty under
+// every covering context, so forcing either loop to zero iterations cannot
+// change any rendered manifest and no assertion could ever catch it. range
+// evaluates its pipeline even when the result is empty, so the probe
+// legitimately proves execution and the verdict is Equivalent — excluded from
+// the score and named in the report, not hidden.
 //
-// This is also the end-to-end proof that the declaration-carrying probe parses:
-// if it did not, the checker would read the parse failure as proof of execution
-// and reach this verdict for the wrong reason, so the count below would be too
-// high rather than too low.
+// extraLabels is also the end-to-end proof that the declaration-carrying probe
+// parses: unlike extras, its loop is ranged with "$k, $v :=", so its Equivalent
+// verdict is reachable only if {{- range $k, $v := fail "canary" }} still
+// parses. That is the missing end-to-end coverage of the probe-declaration
+// fix described in CLAUDE.md; without it, only unit tests in
+// internal/equivalence and internal/source exercised the declaration path.
 func TestEmptyRangeIsJudgedEquivalent(t *testing.T) {
 	got := rangeEmptyByStatus(scoreRangeLoop(t, "tests/strong_test.yaml"))
-	if got[model.StatusEquivalent] != 1 {
-		t.Errorf("range-empty statuses = %v, want exactly 1 equivalent (the extras loop)", got)
+	if got[model.StatusEquivalent] != 2 {
+		t.Errorf("range-empty statuses = %v, want exactly 2 equivalent (extras and extraLabels)", got)
 	}
 }
 

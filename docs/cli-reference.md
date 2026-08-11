@@ -94,14 +94,14 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 ### `--mutators`, `--exclude-mutators`
 
 Valid IDs: `bool-flip`, `comparison-swap`, `cond-negate`, `default-drop`, `num-literal`,
-`required-drop`, `str-literal`, `yaml-key-delete`. See [mutators.md](mutators.md).
+`range-empty`, `required-drop`, `str-literal`, `yaml-key-delete`. See [mutators.md](mutators.md).
 
 An unknown ID is rejected before the run starts, rather than silently running fewer mutators than
 you asked for:
 
 ```console
 $ helm mutation-test ./my-chart --mutators cond-negat
-Error: --mutators: unknown mutator "cond-negat" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, required-drop, str-literal, yaml-key-delete)
+Error: --mutators: unknown mutator "cond-negat" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)
 ```
 
 An empty `--mutators` means "all". `--exclude-mutators` is subtracted afterwards, so the two combine:
@@ -384,7 +384,7 @@ Configuration is validated before the baseline runs, so a typo costs no time. Al
 | `--timeout` < 0 | `--timeout cannot be negative, got N` |
 | bad `--kill-attribution` | `--kill-attribution must be "first" or "all", got "X"` |
 | bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit)` |
-| bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, required-drop, str-literal, yaml-key-delete)` |
+| bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)` |
 | bad `--exclude-mutators` | as above, prefixed `--exclude-mutators:` |
 
 Rejecting an unknown mutator ID rather than ignoring it is deliberate: silently running fewer

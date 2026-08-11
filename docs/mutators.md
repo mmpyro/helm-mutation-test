@@ -52,6 +52,7 @@ Which assertion types actually did the killing in the strong run, measured from 
 | `cond-negate` | `equal` ×9, `lengthEqual` ×5, `hasDocuments` ×4, `notExists` ×1 |
 | `default-drop` | `equal` ×7 |
 | `num-literal` | `equal` ×65, `hasDocuments` ×2, `lengthEqual` ×1 |
+| `range-empty` | — (does not fire on this chart) |
 | `required-drop` | `failedTemplate` ×3 |
 | `str-literal` | `equal` ×63, `isAPIVersion` ×7, `isKind` ×7, `failedTemplate` ×3, `lengthEqual` ×2, `notExists` ×1 |
 | `yaml-key-delete` | `equal` ×175, `lengthEqual` ×19, `isAPIVersion` ×7, `isKind` ×7, `hasDocuments` ×1 |
@@ -421,15 +422,18 @@ output and still score 100%. This is to `range` what `cond-negate` is to `if`.
 
 **The weak test it exposes.** A suite that checks a resource exists but never what its loops
 produced. `isKind` and a single `equal` on a static key cannot notice every port, label or host
-vanishing at once. Measured on `testdata/charts/rangeloop`, whose three loops yield three mutants:
-the weak suite kills **0 of 2** scored ones, the strong suite kills **2 of 2**.
+vanishing at once. Measured on `testdata/charts/rangeloop`, whose four loops yield four mutants:
+the weak suite kills **0 of 2** scored ones, the strong suite kills **2 of 2** (the other two are
+`Equivalent` under both suites, see below).
 
 **When it is correctly excluded.** A loop over a collection that is empty under every covering test
 context cannot change what renders, so no assertion could catch it either. Those are reported as
 [`Equivalent`](concepts.md#equivalent-mutants) and leave the score's denominator, like any other
 unkillable mutant. `range` evaluates its pipeline even when the result is empty, so the execution
 probe can prove the loop was reached and the verdict rests on evidence rather than on a guess. The
-fixture's `extras: []` loop is exactly this case, and is reported `Equivalent` under both suites.
+fixture's `extras: []` and `extraLabels: {}` loops are exactly this case, and both are reported
+`Equivalent` under both suites — `extraLabels` additionally proves that the probe still parses
+when the loop it replaces carries a `$k, $v :=` declaration.
 
 ---
 
