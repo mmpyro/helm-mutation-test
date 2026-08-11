@@ -179,7 +179,10 @@ nobody can fix by writing tests. Disable it only when the render cost matters mo
 for example a tight iteration loop with `--max-mutants`.
 
 Every report format states when the check was skipped, the same way every format states a
-`--max-mutants` truncation — see [reports.md](reports.md).
+`--max-mutants` truncation — see [reports.md](reports.md). It also states how many survivors the check
+ran over but could not decide, because "the check ran" and "the check concluded" are different claims:
+an unloadable chart, a covering suite it had to skip, or a span it could not probe all leave a survivor
+unexamined, and each one's reason lands in its own detail text.
 
 ### `--timeout`
 

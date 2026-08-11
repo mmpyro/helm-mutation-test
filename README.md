@@ -84,6 +84,7 @@ Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
   Score    2.3%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 255 survived)
   not scored: 163 no-coverage · 20 equivalent · 14 invalid
+  8 survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail
 
   By mutator                          killed  survived    score
     bool-flip                              0        14    0.0%

@@ -173,6 +173,24 @@ A mutant whose render is identical everywhere but whose probe never differs from
 `Survived`, with the detail `not exercised by any covering test`: nobody has written a test that reaches
 that line yet, so it remains a real, actionable finding rather than being quietly dropped.
 
+**The probe must never be wider than the mutation.** Go templates short-circuit `and` and `or`, so in
+
+```
+{{- if and .Values.ingress.enabled (eq .Values.ingress.className "nginx") }}
+```
+
+with `ingress.enabled` false under every covering job, the `eq` never evaluates — but a probe over the
+whole `and ...` pipeline errors anyway, because the action itself is reached. That would prove the wrong
+thing and promote two perfectly killable mutants to `Equivalent`. So a mutation behind a short circuit
+is probed by replacing only its own parenthesised sub-pipeline — `{{ if and .Values.a (fail "canary") }}`
+— and when nothing isolates it, such as a bare unparenthesised operand, there is no probe at all and the
+mutant stays `Survived`. No probe is better than a probe that proves the wrong thing.
+
+Where the pass cannot reach a verdict for any of these reasons, the count is reported next to the score
+(`N survivors could not be checked for equivalence`) and each mutant's `detail` says why. "The check
+ran" and "the check concluded" are different claims, and a report that showed only the first would read
+as a fully verified run.
+
 Two things fall outside the check's scope on purpose. A suite that installs a fake Kubernetes provider
 (`kubernetesProvider:`) makes `lookup` return objects the tool's own renderer will never see, so its
 mutants skip detection entirely and stay `Survived`. And a chart's post-renderer is ignored — that can

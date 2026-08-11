@@ -73,7 +73,9 @@ manifest cannot be caught by any assertion either, so it leaves the denominator 
 same way. Excluding a mutant *raises* the score, so the burden of proof is high —
 every uncertain verdict in `internal/equivalence` and in
 `runner.CheckEquivalence`/`RenderContexts` must resolve to `Survived`, never to
-`Equivalent` on a guess.
+`Equivalent` on a guess. Verdicts that decide nothing are counted in
+`Run.EquivalenceUnchecked` and named in every format: `EquivalenceChecked` alone
+says the pass ran, not that it concluded.
 
 **A render error is not a kill.** A mutation that stops the chart rendering is
 "caught" by every test regardless of what it asserts, so it grades nothing. It
@@ -134,6 +136,18 @@ match their `go.mod`.
 chart's committed `__snapshot__` files. Pinned by
 `TestMutantRunsDoNotWriteSnapshots`.
 
+**An execution probe wider than the mutation proves the wrong thing.** Go templates
+short-circuit `and`/`or`, so reaching an action does not mean everything in it was
+evaluated. Replacing the whole pipeline of
+`{{- if and .Values.ingress.enabled (eq .Values.ingress.className "nginx") }}` with
+`fail "canary"` errors whenever the action is reached, which said nothing about the
+`eq` and promoted two killable mutants to `Equivalent`. `source.ProbeSpan` narrows
+the probe to the mutated sub-expression and returns `ok=false` when nothing isolates
+it — the mutant then stays `Survived`. Pinned by
+`TestShortCircuitedOperandIsNotJudgedEquivalent` against
+`testdata/charts/shortcircuit`, a fixture of its own so it does not move the sample
+chart's scores.
+
 **`runner.RenderContexts` reproduces helm-unittest's suite-to-job value merge by
 hand**, because the equivalence pass renders with its own engine rather than going
 through helm-unittest, and that merge (`polishTestJobsPathInfo`, `getUserValues`,
@@ -180,6 +194,10 @@ saying *why* the property matters when it is not obvious. Keep that style.
   and the strong one over 70%. If you change the chart or a mutator, re-check
   `TestWeakSuiteScoresLowAndStrongScoresHigh` — it is the end-to-end guard, and CI
   also fails if the weak suite ever scores above 50%.
+- **`testdata/charts/shortcircuit` is a second fixture, deliberately separate.** It
+  exists only to exercise the short-circuited-operand case above. Keep new
+  single-purpose fixtures out of `sample`: adding a template there changes the
+  measured scores quoted in `README.md`, `docs/` and the pinned session tests.
 - `internal/runner/baseline_test.go`'s `TestMain` doubles as the worker entry point
   so tests exercise the real subprocess protocol rather than a stand-in. Do not
   remove `SetWorkerArgs`.

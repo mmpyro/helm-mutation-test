@@ -113,8 +113,11 @@ Pure, and imports nothing from `internal/runner` — the same posture
 `internal/runner/unittest.go` — the existing and only helm-unittest seam — gains a
 function that extracts one `RenderContext` per test job.
 
-`internal/source` gains one span function, `EnclosingPipelineSpan`, a natural
-neighbour to the existing `CommandArgSpan`, used to place the template probe.
+`internal/source` gains two span functions, `EnclosingPipelineSpan` and
+`ProbeSpan`, natural neighbours to the existing `CommandArgSpan`, used to place the
+template probe. `ProbeSpan` is the one callers use: it narrows to the mutated
+sub-expression wherever an `and`/`or` short circuit would otherwise let a wider
+probe prove the wrong thing.
 
 Both load-bearing boundaries in CLAUDE.md survive: helm-unittest imports stay in
 `unittest.go`, and `equivalence` imports Helm but never `runner`.
@@ -172,6 +175,35 @@ keyword and trim markers:
 Always syntactically valid, never disturbs block structure, and sprig's `fail`
 returns an error only when it is evaluated. Go templates evaluate arguments eagerly
 and do no parse-time type checking, so a render error is proof the span executed.
+
+**Except where an `and`/`or` short circuit sits between the action and the span.**
+Go templates stop evaluating `and`/`or` operands at the one that decides the
+result, so reaching the action is not the same as evaluating everything in it. For
+
+```
+{{- if and .Values.ingress.enabled (eq .Values.ingress.className "nginx") }}
+```
+
+with `ingress.enabled` false under every covering job, the `eq` never runs — yet
+the probe above replaces the whole `and ...` pipeline and errors anyway. That
+proves the action was reached and nothing about the mutated operand, and shipping
+it promoted both mutants inside the `eq` to `Equivalent` when an assertion
+enabling the branch kills them outright.
+
+So the probe is narrowed to no more than the mutated sub-expression:
+
+| original | mutation | probe |
+|---|---|---|
+| `{{ if and .a (eq .b "x") }}` | `"x"` | `{{ if and .a (fail "canary") }}` |
+| `{{ if and .a (eq .b "x") }}` | `eq` | `{{ if and .a (fail "canary") }}` |
+| `{{ if and (eq .b "x") .a }}` | `"x"` | `{{ if fail "canary" }}` — the first operand always evaluates |
+| `{{ if and .a .b }}` | whole condition | `{{ if fail "canary" }}` — the mutation covers the call itself |
+| `{{ if and .a .b }}` | `.b` | **no probe**; the mutant stays `Survived` |
+
+`source.ProbeSpan` computes this: it locates the `and`/`or` calls with the real
+parser, takes the innermost parenthesised sub-pipeline containing the mutation, and
+reports failure when none isolates it or when the template will not parse at all. No
+probe is better than a probe that proves the wrong thing.
 
 **`values.yaml` span.** Substitute a distinctive sentinel string — a fixed literal
 unlikely to occur in a chart, and non-empty so that it is truthy wherever the
@@ -249,6 +281,7 @@ StatusEquivalent Status = "Equivalent"   // CountsTowardScore() == false
 Tally.Equivalent int                     // plus Add() case, plus Total()
 Run.Equivalent() []Mutant                // alongside Survived() and NoCoverage()
 Run.EquivalenceChecked bool
+Run.EquivalenceUnchecked int             // survivors the pass could not decide
 ```
 
 Evidence rides on the existing `Mutant.Detail` field, whose documented meaning gains
@@ -259,6 +292,13 @@ No new struct.
 `EquivalenceChecked` is not optional polish. Without it, `equivalent 0` is ambiguous
 between *checked and found none* and *never looked*, and the second reads as the
 first. That is the same hazard `Run.Capped` exists to prevent.
+
+`EquivalenceUnchecked` closes the remaining half of that gap. `EquivalenceChecked`
+records only that the pass ran, which is not the same as the pass having concluded: a
+chart that fails to load, or covering suites that all have to be skipped, leave every
+survivor unexamined while the report still says "checked, found none equivalent".
+The count of undecided survivors is therefore reported next to the score in every
+format that carries the "check skipped" notice.
 
 ## Report changes
 
@@ -314,6 +354,10 @@ Around that:
   survivors reclassify, and stays far below the 45% assertion and the 50% CI gate.
 - **Probe unit tests per span kind**, including the case that must *not* fire: a
   mutation inside a branch that no covering job's values reach stays `Survived`.
+- **A short-circuit fixture chart** (`testdata/charts/shortcircuit`) whose only
+  branch hides a comparison behind `and`, with no job that enables it. An
+  end-to-end run must leave the mutants inside that comparison `Survived`. It is a
+  chart of its own so that adding it does not move the sample fixture's scores.
 - **Parallelism invariance.** Verdicts do not depend on `--parallel`, pinned the way
   the existing invariance test does it.
 - **Report tests** extend the existing "no two formats disagree" and "every format
