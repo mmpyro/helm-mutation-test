@@ -1,0 +1,106 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  # A release cut from a red build is the same fiction as a mutation score over a
+  # red suite: it reads as a verified artifact while nothing verified it. Nothing
+  # downstream runs if this job fails.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      # install-binary.sh builds its download URL from plugin.yaml's version, so a
+      # tag that disagrees with the manifest publishes assets no installer will ever
+      # ask for: every install 404s and silently falls back to needing a toolchain.
+      - name: The tag and plugin.yaml must agree
+        run: |
+          manifest="$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' plugin.yaml)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "plugin.yaml says version '$manifest', but the tag is '$GITHUB_REF_NAME'." >&2
+            echo "Bump plugin.yaml, or retag; the two must match or the download URL is wrong." >&2
+            exit 1
+          fi
+          echo "Releasing v$manifest"
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Integration tests
+        run: make integration-tests
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: arm64}
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      # CGO_ENABLED=0 is load-bearing, not a habit: a static binary is what lets one
+      # linux asset serve both glibc and musl, so `helm plugin install` inside
+      # alpine/helm needs no toolchain and no libc shim.
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+            -o dist/helm-mutation-test ./cmd/helm-mutation-test
+          tar -czf "helm-mutation-test_${GOOS}_${GOARCH}.tar.gz" -C dist helm-mutation-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helm-mutation-test_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: helm-mutation-test_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # install-binary.sh matches on the second field of each line, so the plain
+      # `sha256sum *` format is the interface here, not a convenience.
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      # No checkout in this job, so gh needs to be told which repo it is releasing.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag dist/*

@@ -58,14 +58,23 @@ Reproduce both with `make demo`.
 helm plugin install https://github.com/mmpyro/helm-mutation-test
 ```
 
+On Helm 4, add `--verify=false`: it declines unsigned plugin sources by default.
+
+This downloads a checksum-verified prebuilt binary (linux and macOS, amd64 and arm64), so no Go
+toolchain is needed. Anywhere else, or if the download fails, it builds from source and does need
+Go.
+
 Or from a checkout of this repository:
 
 ```console
 make install
 ```
 
-Both build from source, so a Go toolchain is required. The chart you point it at needs
-helm-unittest-style suites; the tool is pinned to helm-unittest v1.0.3.
+A checkout always builds from source, so `make install` installs the tree you are editing rather
+than the last release.
+
+The chart you point it at needs helm-unittest-style suites; the tool is pinned to
+helm-unittest v1.1.2.
 
 ### 2. Score a chart
 

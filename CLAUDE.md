@@ -8,7 +8,7 @@ existing helm-unittest suites against each mutation, and reports which mutations
 test noticed. A survived mutant is a missing assertion.
 
 Module: `github.com/mmpyro/helm-mutation-test`. Go 1.24. Pinned to helm-unittest
-v1.0.3 and helm.sh/helm/v3 v3.19.0.
+v1.1.2 and helm.sh/helm/v3 v3.19.0.
 
 ## Commands
 
@@ -31,6 +31,23 @@ than trusting whatever is in `bin/`.
 The `runner` package tests take ~3min under `-race` because they spawn worker
 subprocesses and run real chart renders — the fixture chart yields ~460 mutants
 and several tests score it end to end. That is expected, not a hang.
+
+## Releasing
+
+`.github/workflows/release.yml` fires on a `v*` tag: it re-runs lint, unit and integration tests,
+cross-compiles four static binaries (linux and darwin, amd64 and arm64) and publishes them with a
+`SHA256SUMS` file.
+
+**The tag and `plugin.yaml`'s `version:` must match.** `install-binary.sh` builds its download URL
+from the manifest, so a mismatch publishes assets no installer ever asks for: every install 404s and
+falls back to needing a Go toolchain, which is the failure the binaries exist to remove. The `verify`
+job asserts the two agree rather than trusting them to.
+
+`install-binary.sh` prefers the release asset and builds from source only for a local checkout
+(detected by `$HELM_PLUGIN_DIR` being a symlink, which is how Helm installs a directory) or when the
+download fails. Keep that order: preferring a source build is what made `helm plugin install` fail
+inside `alpine/helm`, which ships no Go. The checksum step refuses an asset it cannot account for and
+falls back to building; only a missing `sha256sum`/`shasum` downgrades to a warning.
 
 ## Architecture
 
