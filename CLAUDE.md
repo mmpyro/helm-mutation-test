@@ -8,7 +8,7 @@ existing helm-unittest suites against each mutation, and reports which mutations
 test noticed. A survived mutant is a missing assertion.
 
 Module: `github.com/mmpyro/helm-mutation-test`. Go 1.24. Pinned to helm-unittest
-v1.0.3 and helm.sh/helm/v3 v3.19.0.
+v1.1.2 and helm.sh/helm/v3 v3.19.0.
 
 ## Commands
 

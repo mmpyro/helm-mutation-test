@@ -74,7 +74,7 @@ A checkout always builds from source, so `make install` installs the tree you ar
 than the last release.
 
 The chart you point it at needs helm-unittest-style suites; the tool is pinned to
-helm-unittest v1.0.3.
+helm-unittest v1.1.2.
 
 ### 2. Score a chart
 
