@@ -51,16 +51,28 @@ Run `make demo` to reproduce both.
 
 ```console
 helm plugin install https://github.com/mmpyro/helm-mutation-test
+
+# Helm 4 refuses unsigned plugin sources unless you say so:
+helm plugin install --verify=false https://github.com/mmpyro/helm-mutation-test
 ```
 
-Requires the Go toolchain (the plugin builds from source on install) and `helm-unittest`-style test
-suites in the chart. Tested against helm-unittest v1.0.3.
+This downloads a prebuilt binary for linux and macOS on amd64 and arm64, verified against the
+release's `SHA256SUMS`. No Go toolchain needed. The binaries are static, so the linux asset also
+works on musl images such as `alpine/helm`.
+
+On any other platform, or if the download fails, the install falls back to building from source and
+then does need Go (https://go.dev/dl/).
+
+Either way the chart needs `helm-unittest`-style test suites. Tested against helm-unittest v1.0.3.
 
 From a checkout:
 
 ```console
 make install
 ```
+
+A checkout always builds from source rather than downloading, so `make install` runs the tree you
+are editing. `HELM_MUTATION_TEST_BUILD=1` forces that behaviour anywhere.
 
 ## Usage
 
