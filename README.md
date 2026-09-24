@@ -1,5 +1,9 @@
 # helm-mutation-test
 
+<p align="center">
+  <img src="logo.png" alt="helm-mutation-test logo">
+</p>
+
 A Helm plugin that measures how much your [helm-unittest](https://github.com/helm-unittest/helm-unittest)
 suites actually assert.
 
