@@ -29,11 +29,12 @@ const (
 	ReportHTML     ReportFormat = "html"
 	ReportMarkdown ReportFormat = "markdown"
 	ReportJUnit    ReportFormat = "junit"
+	ReportSARIF    ReportFormat = "sarif"
 )
 
 // AllReportFormats is every supported --report value.
 var AllReportFormats = []ReportFormat{
-	ReportConsole, ReportJSON, ReportHTML, ReportMarkdown, ReportJUnit,
+	ReportConsole, ReportJSON, ReportHTML, ReportMarkdown, ReportJUnit, ReportSARIF,
 }
 
 // DefaultIncludes are the chart files mutated when --include is not given.
@@ -61,6 +62,9 @@ type Config struct {
 	// jobs. A ShardCount of 0 or 1 means unsharded.
 	ShardIndex int
 	ShardCount int
+	// Since, when set, limits the run to mutants the diff against this git ref
+	// could have affected. Empty means a full run.
+	Since string
 	// EquivalenceCheck re-renders each survivor to find mutations that cannot
 	// change any manifest. They are reported as Equivalent and left out of the
 	// score, which they would otherwise depress by an amount no test can fix.

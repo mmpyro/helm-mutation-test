@@ -82,6 +82,24 @@ func TestMergedRunIsNotASlice(t *testing.T) {
 	}
 }
 
+// A sharded --since run selected fewer mutants than were generated. Merge must
+// count completeness against that selection, and keep the --since disclosure: a
+// merged diff-only score that dropped it would read as a score over the chart.
+func TestMergeKeepsAnIncrementalSelection(t *testing.T) {
+	shards := splitRun(2)
+	for _, s := range shards {
+		s.Generated = 12
+		s.Incremental = &Incremental{Base: "main", BaseCommit: "abc", MutantsSkipped: 3}
+	}
+	merged, err := Merge(shards, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Incremental == nil || merged.Incremental.MutantsSkipped != 3 {
+		t.Errorf("merged run lost the --since selection: %+v", merged.Incremental)
+	}
+}
+
 // Each refusal guards against a merged report that silently covers less than
 // the run it claims to be.
 func TestMergeRefusesAnIncompleteShardSet(t *testing.T) {
@@ -99,6 +117,17 @@ func TestMergeRefusesAnIncompleteShardSet(t *testing.T) {
 		{"different generated", func() []*Run { s := splitRun(2); s[1].Generated = 10; return s }, "generated"},
 		{"different caps", func() []*Run { s := splitRun(2); s[1].Capped = 0; return s }, "capped"},
 		{"different mutators", func() []*Run { s := splitRun(2); s[1].Mutators = []string{"bool-flip"}; return s }, "mutators"},
+		{"since on one shard only", func() []*Run {
+			s := splitRun(2)
+			s[1].Incremental = &Incremental{Base: "main", BaseCommit: "abc"}
+			return s
+		}, "--since"},
+		{"different since diffs", func() []*Run {
+			s := splitRun(2)
+			s[0].Incremental = &Incremental{Base: "main", BaseCommit: "abc"}
+			s[1].Incremental = &Incremental{Base: "main", BaseCommit: "def"}
+			return s
+		}, "--since selected different mutants"},
 		{"index out of range", func() []*Run { s := splitRun(2); s[1].Shard.Index = 3; return s }, "outside 1..2"},
 		{"duplicate mutant", func() []*Run {
 			s := splitRun(2)

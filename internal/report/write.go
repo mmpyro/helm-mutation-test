@@ -19,6 +19,7 @@ const (
 	FileHTML     = fileStem + ".html"
 	FileMarkdown = fileStem + ".md"
 	FileJUnit    = fileStem + ".junit.xml"
+	FileSARIF    = fileStem + ".sarif"
 )
 
 // FileName is the name run's report is written under: name itself, or for a
@@ -63,6 +64,7 @@ func WriteFiles(run *model.Run, cfg *config.Config) ([]Written, error) {
 		{config.ReportJSON, FileJSON, func() ([]byte, error) { return JSON(run) }},
 		{config.ReportMarkdown, FileMarkdown, func() ([]byte, error) { return Markdown(run) }},
 		{config.ReportJUnit, FileJUnit, func() ([]byte, error) { return JUnit(run) }},
+		{config.ReportSARIF, FileSARIF, func() ([]byte, error) { return SARIF(run) }},
 		{config.ReportHTML, FileStryker, func() ([]byte, error) { return Stryker(run, run.ChartPath) }},
 		{config.ReportHTML, FileHTML, func() ([]byte, error) { return HTML(run, run.ChartPath) }},
 	}

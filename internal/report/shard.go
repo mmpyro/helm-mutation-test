@@ -29,4 +29,4 @@ func scoreLabel(run *model.Run) string {
 // selectedCount is how many mutants the cap kept across the whole run. On a
 // shard that is more than len(run.Mutants), and the --max-mutants notice must
 // use it or its numbers stop adding up: "20 of 458 run, 398 not evaluated".
-func selectedCount(run *model.Run) int { return run.Generated - run.Capped }
+func selectedCount(run *model.Run) int { return run.Considered() - run.Capped }

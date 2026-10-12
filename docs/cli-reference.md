@@ -90,6 +90,7 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 | `--seed` | int | `1` | Sampling seed, for a reproducible `--max-mutants` subset and shard split |
 | `--shard-index` | int | `0` | Evaluate only this shard (1-based) of `--shard-count` |
 | `--shard-count` | int | `0` (no sharding) | Split the mutants into this many disjoint shards, one per CI job |
+| `--since` | git ref | *(none)* | Score only the mutants the changes since this ref could affect |
 | `--no-equivalence-check` | bool | `false` | Skip the post-pass that reclassifies unkillable survivors as `Equivalent` |
 | `--timeout` | duration | `0` → 10× the baseline, at least 30s | Per-mutant timeout |
 
@@ -163,6 +164,55 @@ match. Use `--max-mutants` for iteration, not for the number you publish.
 
 Negative values are rejected. `0` means no limit.
 
+### `--since`
+
+Incremental mode, for per-PR CI. The diff runs from `git merge-base <ref> HEAD` to the **working
+tree**, plus untracked files — so in CI it is exactly the branch's commits, and locally it also sees
+the edits you have not committed yet. `--since HEAD` scores only your uncommitted work. Paths outside
+the chart directory are ignored.
+
+Each changed chart-relative path is classified:
+
+| changed path | what runs |
+|---|---|
+| a template under `templates/` (not a `_` partial) | that template's mutants |
+| a suite file the baseline discovered (`-f`) | every file that suite covers — including `values.yaml` and partials, which every suite covers |
+| `tests/__snapshot__/<suite>.snap` | as if `<suite>` changed |
+| anything else: `values.yaml`, a `_*` partial, `Chart.yaml`, `Chart.lock`, `values.schema.json`, `charts/**`, `.helmignore`, a deleted suite, a values file a suite reads, any file a template might read via `.Files.Get` | **a full run**, naming the path that forced it |
+
+Anything not provably attributable falls back to a full run rather than being ignored: guessing that
+a change is harmless would let the score flatter itself.
+
+What was left out is named in every format, the same way `--max-mutants` is:
+
+```console
+$ helm mutation-test ./my-chart --since origin/main
+  changed-files mode (--since origin/main): 1 files inspected, 7 untouched files skipped, 412 mutants not evaluated; score covers the diff only
+```
+
+A fallback says why:
+
+```console
+  --since origin/main: full run, values.yaml changed, and any template may read any value
+```
+
+A diff that touches no mutable chart file scores nothing. Rather than fail `--threshold` on a 0% that
+graded nothing, the run exits 0 and says `nothing in the diff to score; threshold not applied`. A
+full run that scores nothing still fails the threshold.
+
+`--max-mutants` and `--shard-count` compose: they sample and split the mutants the diff selected.
+Every shard must use the same `--since` ref, and `merge` refuses shards whose diffs differ.
+
+**Shallow clones.** `actions/checkout` fetches one commit by default, which has no merge-base with
+`origin/main`. The run exits 2 and says so; fetch history first:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+- run: helm mutation-test ./chart --since origin/${{ github.base_ref }} --threshold 70
+```
+
 ### `--shard-index`, `--shard-count`
 
 Split one run across CI jobs. Each job evaluates a disjoint slice of the mutants and writes its own
@@ -205,7 +255,7 @@ path the shards recorded, which may not exist on the merging machine).
 
 It refuses, with exit 2, anything that would make the merged report cover less than it claims: a
 missing or repeated shard, a report that is not a shard, shards whose `--shard-count`, `--seed`, chart,
-mutators or `--max-mutants` differ, a mutant in two shards, or shards whose mutants do not add up to
+mutators, `--max-mutants` or `--since` diff differ, a mutant in two shards, or shards whose mutants do not add up to
 what the run selected. Exit codes are otherwise those of a normal run.
 
 ### `--no-equivalence-check`
@@ -297,7 +347,7 @@ Any value other than `first` or `all` is rejected.
 
 | flag | type | default | purpose |
 |---|---|---|---|
-| `--report` | comma-separated list | `console` | Report formats: `console`, `json`, `html`, `markdown`, `junit` |
+| `--report` | comma-separated list | `console` | Report formats: `console`, `json`, `html`, `markdown`, `junit`, `sarif` |
 | `--report-dir` | string | `.helm-mutation-test` | Directory for file reports |
 | `--threshold` | float | `0` (disabled) | Exit 1 if the mutation score is below this percentage |
 | `--color` | bool | `false` | Force coloured output even when stdout is not a terminal |
@@ -328,6 +378,7 @@ fixed, except that a shard inserts its position after the stem
 | `json` | `mutation-report.json` |
 | `markdown` | `mutation-report.md` |
 | `junit` | `mutation-report.junit.xml` |
+| `sarif` | `mutation-report.sarif` |
 | `html` | `mutation-report.html` **and** `mutation-report.stryker.json` |
 
 `html` writes two files on purpose: the standard-schema JSON is useful on its own, since that is what
@@ -337,7 +388,7 @@ An unknown format is rejected before the run:
 
 ```console
 $ helm mutation-test ./my-chart --report bogus
-Error: unknown --report format "bogus" (valid: console, json, html, markdown, junit)
+Error: unknown --report format "bogus" (valid: console, json, html, markdown, junit, sarif)
 ```
 
 ### `--threshold`
@@ -379,7 +430,8 @@ $ helm mutation-test ./my-chart -d 2>&1 >/dev/null | grep '^==>'
 ==> Evaluating 458 mutants across 12 workers
 ```
 
-A `--max-mutants` run adds a fourth phase line naming the cap and the drop count.
+A `--max-mutants` run adds a phase line naming the cap and the drop count; a `--since` run adds one
+listing the diff and one naming what it skipped, or why it fell back to a full run.
 
 ### `--keep-workdir`
 
@@ -415,6 +467,7 @@ Code 2 covers, verified:
 - any flag validation failure;
 - `merge` given an incomplete, inconsistent or unreadable set of shard reports;
 - wrong number of positional arguments;
+- a `--since` ref with no merge-base with `HEAD` (unknown ref, shallow clone, not a git checkout);
 - a report file that could not be written.
 
 The split between 1 and 2 is what lets CI distinguish "your tests are weak" from "the tool could not
@@ -436,7 +489,7 @@ Configuration is validated before the baseline runs, so a typo costs no time. Al
 | `--shard-index` outside `1..M` | `--shard-index must be between 1 and M, got N` |
 | `--threshold` with `--shard-count` > 1 | `--threshold cannot be used with --shard-count: a shard is a slice, not a score; ...` |
 | bad `--kill-attribution` | `--kill-attribution must be "first" or "all", got "X"` |
-| bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit)` |
+| bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit, sarif)` |
 | bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)` |
 | bad `--exclude-mutators` | as above, prefixed `--exclude-mutators:` |
 

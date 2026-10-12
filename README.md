@@ -87,7 +87,10 @@ helm mutation-test ./my-chart
 ```console
 # Fail CI below 70%, and write reports the job can publish
 helm mutation-test ./my-chart --threshold 70 \
-  --report console,markdown,html,junit --report-dir ./mutation
+  --report console,markdown,html,junit,sarif --report-dir ./mutation
+
+# Per-PR: score only what the branch changed (needs fetch-depth: 0 in CI)
+helm mutation-test ./my-chart --since origin/main --threshold 70
 
 # A fast subset while iterating on tests
 helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
@@ -167,8 +170,11 @@ folding it in would flatter the number:
 | **Error** | The tool itself failed on that mutant. |
 
 `--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
-coverage. For the same reason a `--shard-count` shard labels its score a slice in every format, refuses
-`--threshold`, and only the `merge` of every shard is graded. `--no-equivalence-check` disables the equivalence pass; every format states when that
+coverage. `--since` does the same for the mutants outside the diff, and falls back to a full run —
+saying why — when a change such as `values.yaml` or a partial cannot be attributed to particular
+templates. For the same reason a `--shard-count` shard labels its score a slice in every format, refuses
+`--threshold`, and only the `merge` of every shard is graded. `--no-equivalence-check` disables the
+equivalence pass; every format states when that
 happened, the same way it states a truncation.
 
 ## Reports
@@ -186,6 +192,9 @@ happened, the same way it states a truncation.
 - **markdown** — sized for `$GITHUB_STEP_SUMMARY` or a PR comment.
 - **junit** — one `testcase` per mutant. **Survived becomes a `failure`**, since a survivor is the
   defect worth failing a build over; killed mutants pass, and the non-grading statuses are skipped.
+- **sarif** — SARIF 2.1.0 for GitHub code scanning and editor Problems panels. Each survivor is
+  annotated on the line it mutated; each untested template is one alert. Everything left out of the
+  results is named in the run's notifications.
 
 ## How it works
 
@@ -243,7 +252,7 @@ make demo    # score the fixture chart with both suites
 | [Quickstart and index](docs/README.md) | installation, a first run, where to go next |
 | [CLI reference](docs/cli-reference.md) | every flag, with defaults and exit codes |
 | [Mutators](docs/mutators.md) | all nine mutators, with before/after examples |
-| [Reports](docs/reports.md) | all five output formats, with samples |
+| [Reports](docs/reports.md) | all six output formats, with samples |
 | [Concepts](docs/concepts.md) | the score, the six statuses, the baseline gate |
 
 ## Known limits
@@ -252,4 +261,5 @@ make demo    # score the fixture chart with both suites
   glob (`-f 'tests/**/*_test.yaml'`).
 - A suite file that fails to parse aborts the run, matching helm-unittest's own behaviour.
 - Mutation is one change at a time; no higher-order mutants.
-- No incremental mode yet: every run evaluates the full mutant set unless `--max-mutants` is given.
+- `--since` treats any change it cannot attribute (values, partials, `Chart.yaml`, subcharts, files
+  read via `.Files.Get`) as a reason for a full run, so PRs touching shared files gain no speedup.

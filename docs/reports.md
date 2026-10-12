@@ -1,10 +1,10 @@
 # Report formats
 
-Five formats, selected with `--report` in any combination. Every one is a pure function of the run
+Six formats, selected with `--report` in any combination. Every one is a pure function of the run
 model, so they always agree with each other.
 
 ```console
-helm mutation-test ./my-chart --report console,json,markdown,junit,html --report-dir ./mutation
+helm mutation-test ./my-chart --report console,json,markdown,junit,html,sarif --report-dir ./mutation
 ```
 
 | format | destination | filename | use it for |
@@ -13,12 +13,13 @@ helm mutation-test ./my-chart --report console,json,markdown,junit,html --report
 | [`json`](#json) | file | `mutation-report.json` | Building something on top; the canonical model |
 | [`markdown`](#markdown) | file | `mutation-report.md` | `$GITHUB_STEP_SUMMARY`, PR comments |
 | [`junit`](#junit) | file | `mutation-report.junit.xml` | CI systems that already display test results |
+| [`sarif`](#sarif) | file | `mutation-report.sarif` | GitHub code scanning, inline PR annotations, the editor's Problems panel |
 | [`html`](#html) | file | `mutation-report.html` **+** `mutation-report.stryker.json` | A publishable artifact with annotated source |
 
 `--report-dir` (default `.helm-mutation-test`) is created only when a non-console format is requested.
 
 **Every format names what it excluded.** The score, the non-scoring counts, and any `--max-mutants`
-truncation appear in all five. That is a deliberate invariant: a report that showed only the score
+truncation appear in all six. That is a deliberate invariant: a report that showed only the score
 could let a truncated or partially-covered run read as full coverage. See
 [concepts.md](concepts.md#truncation-is-always-reported).
 
@@ -294,8 +295,27 @@ survivor these breakdowns could otherwise have shown.)*
 Field notes:
 
 - `score` is rounded to two places. `passed` reflects `--threshold`; with no threshold it is `true`.
-- `generated` is the count **before** any `--max-mutants` cap; `capped` is how many were dropped.
-  `generated - capped == len(mutants)`.
+- `generated` is the count **before** any `--max-mutants` cap or `--since` narrowing; `capped` is how
+  many the cap dropped. `generated - incremental.mutantsSkipped - capped == len(mutants)`
+  (`mutantsSkipped` is 0 without `--since`).
+- `incremental` is present only for a `--since` run:
+
+  ```json
+  "incremental": {
+    "base": "origin/main",
+    "baseCommit": "fd15dca…",
+    "filesChanged": ["templates/service.yaml"],
+    "filesInspected": 1,
+    "filesSkipped": 7,
+    "mutantsSkipped": 412,
+    "fullRunReason": ""
+  }
+  ```
+
+  `filesChanged` is every chart-relative path in the diff; `filesInspected`/`filesSkipped` count
+  mutable files; `fullRunReason` (omitted when empty) names the change that forced a full run, in
+  which case `mutantsSkipped` is 0. Every other format prints the same facts as one line, and
+  JUnit as a prepended `--since` skipped testcase.
 - `byMutator` and `byFile` are sorted ascending by score.
 - `equivalenceChecked` distinguishes a run where the pass found no equivalent mutants from one where
   `--no-equivalence-check` skipped it entirely — `tally.equivalent == 0` is ambiguous on its own.
@@ -419,7 +439,7 @@ jq -r '.mutants[] | select(.status=="NoCoverage") | .file' mutation-report.json 
 jq -r '.mutants[] | select(.status=="Equivalent") | "\(.file):\(.line)\t\(.detail)"' mutation-report.json
 
 # Confirm nothing was silently dropped (on a shard, other shards hold the rest)
-jq '{generated, capped, otherShards: (.shard.otherShards // 0), evaluated: (.mutants|length)}' mutation-report.json
+jq '{generated, capped, diffSkipped: (.incremental.mutantsSkipped // 0), otherShards: (.shard.otherShards // 0), evaluated: (.mutants|length)}' mutation-report.json
 
 # Confirm the equivalence pass actually ran, rather than being skipped, and that
 # it reached a verdict on every survivor
@@ -637,6 +657,84 @@ attributes, which therefore stay equal to the sum over child suites.
   uses: mikepenz/action-junit-report@v4
   with:
     report_paths: ./mutation/mutation-report.junit.xml
+```
+
+---
+
+## `sarif`
+
+A [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log: the format
+behind GitHub's code-scanning alerts, inline PR annotations, and the Problems panel of any editor
+with a SARIF viewer.
+
+**Use it for** survivors annotated on the template line they mutated, in the PR diff or in the editor,
+without anyone opening the HTML artifact.
+
+**Every result becomes an alert, so only actionable findings are results:**
+
+| status | SARIF |
+|---|---|
+| Survived | one `result` per mutant; rule = the mutator ID |
+| NoCoverage | one `result` **per file**, rule `no-coverage`, at line 1 |
+| Killed, Invalid, Equivalent, Timeout, Error | no result; counted in the notifications below |
+
+A survivor's `level` is `error` when the run misses `--threshold`, the same condition as exit code
+1, so red annotations line up with a red job. Otherwise it is `warning`. A no-coverage result is
+always `warning`.
+
+The weak run (threshold 70) produces 255 survivor results and 5 no-coverage results:
+
+```json
+{
+  "ruleId": "default-drop",
+  "level": "error",
+  "message": {
+    "text": "no test noticed this default-drop mutation at templates/_helpers.tpl:2\n- {{- $name := .Values.nameOverride | default .Chart.Name -}}\n+ {{- $name := .Values.nameOverride -}}\nran 4 tests in tests/weak_test.yaml — all passed\nsuites run: tests/weak_test.yaml\nAdd an assertion that distinguishes the original from the mutation."
+  },
+  "locations": [{
+    "physicalLocation": {
+      "artifactLocation": { "uri": "testdata/charts/sample/templates/_helpers.tpl", "uriBaseId": "%SRCROOT%" },
+      "region": { "startLine": 2, "startColumn": 34, "endColumn": 56 }
+    }
+  }],
+  "partialFingerprints": { "mutantFingerprint/v1": "b2dd554b…f1e0:1" },
+  "properties": { "mutantId": "_helpers.tpl:66:default-drop", "status": "Survived", "original": " | default .Chart.Name", "mutated": "", "coveringSuites": ["tests/weak_test.yaml"] }
+}
+```
+
+**What the results leave out is named in the invocation's `toolExecutionNotifications`:**
+
+```text
+note     mutation score 2.3% (6 killed of 261 scored); excluded from the score: 163 no-coverage, 14 invalid, 20 equivalent, 0 timeout, 0 error
+note     score 2.3% is below the 70.0% threshold
+warning  8 survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail
+```
+
+A `--max-mutants` cap, a `--no-equivalence-check` run and partially analysed files each add a
+`warning` notification, worded as in JUnit. `runs[0].properties` repeats the numbers: `score`,
+`tally`, `generated`, `capped`, `equivalenceChecked`, `equivalenceUnchecked`, `threshold`.
+
+**Locations:**
+- `uri` is the chart path as you passed it, joined with the chart-relative file, relative to
+  `%SRCROOT%`. GitHub resolves that against the checkout root, so **run from the repository root with
+  a relative chart path**. An absolute chart path gives an absolute `file://` URI.
+- Columns count Unicode code points (`columnKind: unicodeCodePoints`), not bytes. Like the Stryker
+  report, the region covers only the mutation's first line.
+- `partialFingerprints` hashes the file, mutator, original and mutated text and the trimmed source
+  line, not the mutant ID. The ID embeds a byte offset, so an edit above a survivor would otherwise
+  close its alert and open an identical new one.
+
+```yaml
+permissions:
+  security-events: write   # upload-sarif needs this
+steps:
+  - run: helm mutation-test ./charts/my-chart --report sarif --report-dir ./mutation
+  - name: Upload mutation survivors
+    if: always()
+    uses: github/codeql-action/upload-sarif@v3
+    with:
+      sarif_file: ./mutation/mutation-report.sarif
+      category: helm-mutation-test
 ```
 
 ---

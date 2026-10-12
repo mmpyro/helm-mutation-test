@@ -32,6 +32,7 @@ func JSON(run *model.Run) ([]byte, error) {
 		ByFile:               breakdowns(run.ByFile()),
 		Mutants:              run.Mutants,
 		Skipped:              run.SkippedFiles,
+		Incremental:          run.Incremental,
 		Timing: timing{
 			BaselineMillis: run.BaselineDuration.Milliseconds(),
 			TotalMillis:    run.Duration.Milliseconds(),
@@ -73,7 +74,10 @@ type jsonReport struct {
 	ByFile    []breakdown         `json:"byFile"`
 	Mutants   []model.Mutant      `json:"mutants"`
 	Skipped   []model.SkippedFile `json:"skippedFiles,omitempty"`
-	Timing    timing              `json:"timing"`
+	// Incremental is present only for a --since run; its absence means the
+	// score covers every generated mutant (less any --max-mutants cap).
+	Incremental *model.Incremental `json:"incremental,omitempty"`
+	Timing      timing             `json:"timing"`
 }
 
 // jsonSchema identifies the wire shape. ReadJSON refuses anything else rather
@@ -106,6 +110,7 @@ func ReadJSON(data []byte) (*model.Run, error) {
 		EquivalenceChecked:   r.EquivalenceChecked,
 		EquivalenceUnchecked: r.EquivalenceUnchecked,
 		SkippedFiles:         r.Skipped,
+		Incremental:          r.Incremental,
 		BaselineDuration:     time.Duration(r.Timing.BaselineMillis) * time.Millisecond,
 		Duration:             time.Duration(r.Timing.TotalMillis) * time.Millisecond,
 		Threshold:            r.Threshold,

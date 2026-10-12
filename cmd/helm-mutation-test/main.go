@@ -99,7 +99,10 @@ Examples:
 
   # Fail CI below 70%, and write reports a CI job can publish
   helm mutation-test ./my-chart --threshold 70 \
-    --report console,markdown,html,junit --report-dir ./mutation
+    --report console,markdown,html,junit,sarif --report-dir ./mutation
+
+  # Per-PR CI: score only what the branch changed
+  helm mutation-test ./my-chart --since origin/main --threshold 70
 
   # A fast subset while iterating on tests
   helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
@@ -152,6 +155,9 @@ Examples:
 		"evaluate only this shard (1-based) of --shard-count; combine the shards' JSON reports with 'merge'")
 	f.IntVar(&cfg.ShardCount, "shard-count", 0,
 		"split the mutants into this many disjoint shards, one per CI job (0 or 1 = no sharding)")
+	f.StringVar(&cfg.Since, "since", "",
+		"only score mutants the changes since this git ref could affect (merge-base to working tree);\n"+
+			"values.yaml, partials and other shared files fall back to a full run")
 	// pflag has no native negated bool, so bind the negation and invert it after
 	// parsing. Keep backticks out of the usage string: pflag's UnquoteUsage turns
 	// the first backquoted run into the flag's displayed value type.
@@ -167,7 +173,7 @@ Examples:
 
 	// Output.
 	f.StringSliceVar(&reports, "report", []string{string(config.ReportConsole)},
-		"report formats: console, json, html, markdown, junit")
+		"report formats: console, json, html, markdown, junit, sarif")
 	f.StringVar(&cfg.ReportDir, "report-dir", cfg.ReportDir, "directory for file reports")
 	f.Float64Var(&cfg.Threshold, "threshold", 0,
 		"exit 1 if the mutation score is below this percentage (0 disables the check)")

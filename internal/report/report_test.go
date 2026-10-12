@@ -120,9 +120,9 @@ func sampleRun() *model.Run {
 // is tolerated (see TestStrykerToleratesUnreadableSource).
 const allFormatsChartDir = "testdata/allformats-fixture"
 
-// allFormats renders run through every one of the five report formats, so a
+// allFormats renders run through every one of the six report formats, so a
 // property that must hold across all of them can be checked in one loop
-// instead of five near-identical tests.
+// instead of six near-identical tests.
 func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 	t.Helper()
 	var out []struct{ name, output string }
@@ -157,6 +157,12 @@ func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 	}
 	out = append(out, struct{ name, output string }{"html", string(html)})
 
+	sa, err := SARIF(run)
+	if err != nil {
+		t.Fatalf("SARIF: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"sarif", string(sa)})
+
 	return out
 }
 
@@ -164,7 +170,7 @@ func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 
 func TestEveryFormatNamesEquivalentMutants(t *testing.T) {
 	// An exclusion no format mentions reads as full coverage to anyone looking at
-	// that format. Equivalent joins no-coverage and invalid in all five.
+	// that format. Equivalent joins no-coverage and invalid in all six.
 	run := &model.Run{
 		ChartName:          "sample",
 		EquivalenceChecked: true,
@@ -200,6 +206,78 @@ func TestEveryFormatSaysWhenEquivalenceWasNotChecked(t *testing.T) {
 	for _, tc := range allFormats(t, run) {
 		if !strings.Contains(strings.ToLower(tc.output), "equivalence") {
 			t.Errorf("%s does not say the equivalence check was skipped:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
+// ---------- incremental (cross-format) ----------
+
+func incrementalRun() *model.Run {
+	run := sampleRun()
+	run.Capped = 0
+	run.Incremental = &model.Incremental{
+		Base: "main", BaseCommit: "abc123",
+		FilesChanged:   []string{"templates/service.yaml"},
+		FilesInspected: 1, FilesSkipped: 7, MutantsSkipped: 412,
+	}
+	return run
+}
+
+// A diff-only score that does not say so reads as a score over the whole chart.
+// Same rule as --max-mutants: every format names what was left out.
+func TestEveryFormatSaysTheScoreCoversTheDiffOnly(t *testing.T) {
+	for _, tc := range allFormats(t, incrementalRun()) {
+		if tc.name == "json" {
+			for _, want := range []string{`"incremental"`, `"base": "main"`, `"mutantsSkipped": 412`,
+				`"filesChanged"`, `"templates/service.yaml"`} {
+				if !strings.Contains(tc.output, want) {
+					t.Errorf("json lacks %s:\n%s", want, tc.output)
+				}
+			}
+			continue
+		}
+		for _, want := range []string{"--since main", "412", "score covers the diff only"} {
+			if !strings.Contains(tc.output, want) {
+				t.Errorf("%s does not say %q:\n%s", tc.name, want, tc.output)
+			}
+		}
+	}
+}
+
+// A fallback must say why it ran everything, or a slow --since run looks broken.
+func TestEveryFormatNamesTheFullRunReason(t *testing.T) {
+	run := incrementalRun()
+	run.Incremental.FullRunReason = "values.yaml changed, and any template may read any value"
+	run.Incremental.MutantsSkipped = 0
+	for _, tc := range allFormats(t, run) {
+		if !strings.Contains(tc.output, "values.yaml changed") {
+			t.Errorf("%s does not name the full-run reason:\n%s", tc.name, tc.output)
+		}
+		if tc.name != "json" && strings.Contains(tc.output, "diff only") {
+			t.Errorf("%s claims a diff-only score for a full run:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
+// An exit 0 over an empty diff must be explained, not look like a passing score.
+func TestEveryFormatSaysWhenTheDiffHadNothingToScore(t *testing.T) {
+	run := incrementalRun()
+	run.Mutants = nil
+	run.ComputeTally()
+	for _, tc := range allFormats(t, run) {
+		if tc.name == "json" {
+			continue // the block plus a zero tally carry it
+		}
+		if !strings.Contains(tc.output, "nothing in the diff to score; threshold not applied") {
+			t.Errorf("%s does not explain the empty diff:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
+func TestFullRunsCarryNoIncrementalNotice(t *testing.T) {
+	for _, tc := range allFormats(t, sampleRun()) {
+		if strings.Contains(tc.output, "--since") || strings.Contains(tc.output, `"incremental"`) {
+			t.Errorf("%s mentions incremental mode on a full run:\n%s", tc.name, tc.output)
 		}
 	}
 }
@@ -832,7 +910,7 @@ func TestWriteFilesEmitsEveryRequestedFormat(t *testing.T) {
 	cfg.ReportDir = filepath.Join(dir, "out")
 	cfg.Reports = []config.ReportFormat{
 		config.ReportConsole, config.ReportJSON, config.ReportHTML,
-		config.ReportMarkdown, config.ReportJUnit,
+		config.ReportMarkdown, config.ReportJUnit, config.ReportSARIF,
 	}
 
 	written, err := WriteFiles(run, &cfg)
@@ -840,10 +918,10 @@ func TestWriteFilesEmitsEveryRequestedFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// HTML also emits its standard-schema JSON, which other tooling consumes.
-	if len(written) != 5 {
-		t.Errorf("got %d files, want 5: %+v", len(written), written)
+	if len(written) != 6 {
+		t.Errorf("got %d files, want 6: %+v", len(written), written)
 	}
-	for _, name := range []string{FileJSON, FileMarkdown, FileJUnit, FileHTML, FileStryker} {
+	for _, name := range []string{FileJSON, FileMarkdown, FileJUnit, FileHTML, FileStryker, FileSARIF} {
 		path := filepath.Join(cfg.ReportDir, name)
 		info, err := os.Stat(path)
 		if err != nil {
@@ -985,6 +1063,9 @@ func TestEveryFormatNamesUncheckedSurvivors(t *testing.T) {
 		},
 		"json": func(r *model.Run) (string, error) {
 			b, err := JSON(r)
+			return string(b), err
+		}, "sarif": func(r *model.Run) (string, error) {
+			b, err := SARIF(r)
 			return string(b), err
 		},
 	}

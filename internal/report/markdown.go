@@ -68,7 +68,11 @@ func Markdown(run *model.Run) ([]byte, error) {
 
 	if run.Capped > 0 {
 		fmt.Fprintf(b, "> ⚠️ `--max-mutants` ran %d of %d generated mutants; %d were not evaluated.\n\n",
-			selectedCount(run), run.Generated, run.Capped)
+			selectedCount(run), run.Considered(), run.Capped)
+	}
+
+	for _, n := range incrementalNotices(run) {
+		fmt.Fprintf(b, "> ⚠️ %s.\n\n", n)
 	}
 
 	writeMarkdownBreakdown(b, "Score by mutator", run.ByMutator())

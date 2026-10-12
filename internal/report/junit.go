@@ -87,6 +87,13 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Tests++
 		suites.Skipped++
 	}
+	// A diff-only run reads as a full one in a CI UI unless it says otherwise.
+	if run.Incremental != nil {
+		suites.Suites = append([]junitSuite{incrementalNotice(run)}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
+
 	// A shard's results are a slice of the run. Prepended last so it is the very
 	// first suite a CI UI shows: it qualifies every other number in the file.
 	if run.IsSlice() {
@@ -153,10 +160,7 @@ func cappedNotice(run *model.Run) junitSuite {
 			Name:      "truncated run",
 			ClassName: "--max-mutants",
 			Time:      "0.0000",
-			Skipped: &junitSkipped{Message: fmt.Sprintf(
-				"%d of %d generated mutants were not evaluated (--max-mutants); "+
-					"this run is a sample, not full coverage",
-				run.Capped, run.Generated)},
+			Skipped:   &junitSkipped{Message: cappedMessage(run)},
 		}},
 	}
 }
@@ -193,8 +197,7 @@ func equivalenceCheckSkippedNotice() junitSuite {
 			Name:      "equivalence check skipped",
 			ClassName: "--no-equivalence-check",
 			Time:      "0.0000",
-			Skipped: &junitSkipped{Message: "the equivalence check did not run " +
-				"(--no-equivalence-check); some survivors may be unkillable"},
+			Skipped:   &junitSkipped{Message: equivalenceSkippedMessage},
 		}},
 	}
 }
@@ -213,12 +216,41 @@ func equivalenceUncheckedNotice(run *model.Run) junitSuite {
 			Name:      "survivors not checked for equivalence",
 			ClassName: "equivalence-unchecked",
 			Time:      "0.0000",
-			Skipped: &junitSkipped{Message: fmt.Sprintf(
-				"%d survivors could not be checked for equivalence and may be unkillable; "+
-					"each one's reason is in its detail",
-				run.EquivalenceUnchecked)},
+			Skipped:   &junitSkipped{Message: equivalenceUncheckedMessage(run)},
 		}},
 	}
+}
+
+// incrementalNotice records what a --since run left out, or why it ran in full.
+func incrementalNotice(run *model.Run) junitSuite {
+	return junitSuite{
+		Name:     "--since",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      "changed-files mode",
+			ClassName: "--since",
+			Time:      "0.0000",
+			Skipped:   &junitSkipped{Message: strings.Join(incrementalNotices(run), "; ")},
+		}},
+	}
+}
+
+// The disclosure wording is shared with SARIF, the other format whose consumers
+// see only a list of findings and would otherwise miss what the run left out.
+
+func cappedMessage(run *model.Run) string {
+	return fmt.Sprintf("%d of %d generated mutants were not evaluated (--max-mutants); "+
+		"this run is a sample, not full coverage", run.Capped, run.Considered())
+}
+
+const equivalenceSkippedMessage = "the equivalence check did not run " +
+	"(--no-equivalence-check); some survivors may be unkillable"
+
+func equivalenceUncheckedMessage(run *model.Run) string {
+	return fmt.Sprintf("%d survivors could not be checked for equivalence and may be unkillable; "+
+		"each one's reason is in its detail", run.EquivalenceUnchecked)
 }
 
 type junitSuites struct {

@@ -13,7 +13,7 @@ import (
 // Every check here guards the same failure: a merged report that is quietly
 // missing mutants reads as full coverage. So an incomplete or inconsistent shard
 // set is an error, never a best-effort partial merge — the last check, that the
-// mutants add up to exactly what was generated minus what was capped, proves
+// mutants add up to exactly what was considered minus what was capped, proves
 // completeness end to end rather than trusting the shard metadata.
 func Merge(shards []*Run, threshold float64) (*Run, error) {
 	if len(shards) == 0 {
@@ -45,6 +45,7 @@ func Merge(shards []*Run, threshold float64) (*Run, error) {
 		TestCount:          first.TestCount,
 		Generated:          first.Generated,
 		Capped:             first.Capped,
+		Incremental:        first.Incremental,
 		EquivalenceChecked: true,
 		Threshold:          threshold,
 	}
@@ -71,9 +72,9 @@ func Merge(shards []*Run, threshold float64) (*Run, error) {
 		merged.BaselineDuration = max(merged.BaselineDuration, s.BaselineDuration)
 	}
 
-	if want := merged.Generated - merged.Capped; len(merged.Mutants) != want {
-		return nil, fmt.Errorf("the %d shards hold %d mutants, but the run selected %d (%d generated, %d capped)",
-			count, len(merged.Mutants), want, merged.Generated, merged.Capped)
+	if want := merged.Considered() - merged.Capped; len(merged.Mutants) != want {
+		return nil, fmt.Errorf("the %d shards hold %d mutants, but the run selected %d (%d considered, %d capped)",
+			count, len(merged.Mutants), want, merged.Considered(), merged.Capped)
 	}
 
 	// Restore Generate's order — file, offset, mutator, ID — so a merged report
@@ -110,6 +111,12 @@ func sameRun(a, b *Run) error {
 		return fmt.Errorf("%d vs %d mutants generated; the chart or --include/--exclude differ", a.Generated, b.Generated)
 	case a.Capped != b.Capped:
 		return fmt.Errorf("%d vs %d mutants capped; --max-mutants differs", a.Capped, b.Capped)
+	case (a.Incremental == nil) != (b.Incremental == nil):
+		return fmt.Errorf("one was run with --since and the other was not")
+	case a.Incremental != nil && (a.Incremental.BaseCommit != b.Incremental.BaseCommit ||
+		a.Incremental.MutantsSkipped != b.Incremental.MutantsSkipped):
+		return fmt.Errorf("--since selected different mutants (base %s vs %s)",
+			a.Incremental.BaseCommit, b.Incremental.BaseCommit)
 	}
 	return nil
 }
