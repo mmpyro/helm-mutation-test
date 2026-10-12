@@ -16,6 +16,7 @@ const (
 	FileHTML     = "mutation-report.html"
 	FileMarkdown = "mutation-report.md"
 	FileJUnit    = "mutation-report.junit.xml"
+	FileSARIF    = "mutation-report.sarif"
 )
 
 // Written records an emitted report file so the CLI can tell the user where to look.
@@ -46,6 +47,7 @@ func WriteFiles(run *model.Run, cfg *config.Config) ([]Written, error) {
 		{config.ReportJSON, FileJSON, func() ([]byte, error) { return JSON(run) }},
 		{config.ReportMarkdown, FileMarkdown, func() ([]byte, error) { return Markdown(run) }},
 		{config.ReportJUnit, FileJUnit, func() ([]byte, error) { return JUnit(run) }},
+		{config.ReportSARIF, FileSARIF, func() ([]byte, error) { return SARIF(run) }},
 		{config.ReportHTML, FileStryker, func() ([]byte, error) { return Stryker(run, run.ChartPath) }},
 		{config.ReportHTML, FileHTML, func() ([]byte, error) { return HTML(run, run.ChartPath) }},
 	}
