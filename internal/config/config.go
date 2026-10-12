@@ -57,6 +57,10 @@ type Config struct {
 	Exclude         []string
 	MaxMutants      int
 	Seed            int64
+	// ShardIndex (1-based) and ShardCount split the selected mutants across CI
+	// jobs. A ShardCount of 0 or 1 means unsharded.
+	ShardIndex int
+	ShardCount int
 	// EquivalenceCheck re-renders each survivor to find mutations that cannot
 	// change any manifest. They are reported as Equivalent and left out of the
 	// score, which they would otherwise depress by an amount no test can fix.
@@ -79,6 +83,9 @@ type Config struct {
 // FailFast reports whether mutant runs should stop at the first failing test.
 // Baseline runs never fail fast; they need the complete picture.
 func (c *Config) FailFast() bool { return c.KillAttribution == AttributionFirst }
+
+// Sharded reports whether this run evaluates one slice of a split run.
+func (c *Config) Sharded() bool { return c.ShardCount > 1 }
 
 // WantsReport reports whether the given format was requested.
 func (c *Config) WantsReport(f ReportFormat) bool { return slices.Contains(c.Reports, f) }
@@ -124,6 +131,9 @@ func (c *Config) Validate(knownMutators []string) error {
 	if c.Threshold < 0 || c.Threshold > 100 {
 		return fmt.Errorf("--threshold must be between 0 and 100, got %v", c.Threshold)
 	}
+	if err := c.validateShard(); err != nil {
+		return err
+	}
 	if c.Timeout < 0 {
 		return fmt.Errorf("--timeout cannot be negative, got %v", c.Timeout)
 	}
@@ -133,10 +143,8 @@ func (c *Config) Validate(knownMutators []string) error {
 		return fmt.Errorf("--kill-attribution must be %q or %q, got %q",
 			AttributionFirst, AttributionAll, c.KillAttribution)
 	}
-	for _, f := range c.Reports {
-		if !slices.Contains(AllReportFormats, f) {
-			return fmt.Errorf("unknown --report format %q (valid: %s)", f, joinFormats())
-		}
+	if err := CheckReports(c.Reports); err != nil {
+		return err
 	}
 	if err := checkMutators("--mutators", c.Mutators, knownMutators); err != nil {
 		return err
@@ -176,6 +184,37 @@ func (c *Config) ResolveTimeout(baseline time.Duration) time.Duration {
 		return scaled
 	}
 	return 30 * time.Second
+}
+
+func (c *Config) validateShard() error {
+	switch {
+	case c.ShardCount < 0:
+		return fmt.Errorf("--shard-count cannot be negative, got %d", c.ShardCount)
+	case c.ShardIndex < 0:
+		return fmt.Errorf("--shard-index cannot be negative, got %d", c.ShardIndex)
+	case c.ShardCount == 0 && c.ShardIndex > 0:
+		return fmt.Errorf("--shard-index needs --shard-count")
+	case c.ShardCount > 1 && c.ShardIndex == 0:
+		return fmt.Errorf("--shard-count needs --shard-index (1 to %d)", c.ShardCount)
+	case c.ShardCount > 0 && c.ShardIndex > c.ShardCount:
+		return fmt.Errorf("--shard-index must be between 1 and %d, got %d", c.ShardCount, c.ShardIndex)
+	case c.Sharded() && c.Threshold > 0:
+		// A shard's score covers a slice of the mutants; gating on it would pass or
+		// fail CI on a number that is not the chart's mutation score.
+		return fmt.Errorf("--threshold cannot be used with --shard-count: a shard is a slice, not a score; " +
+			"gate on the merged report with 'helm mutation-test merge --threshold'")
+	}
+	return nil
+}
+
+// CheckReports rejects any --report value that is not a supported format.
+func CheckReports(formats []ReportFormat) error {
+	for _, f := range formats {
+		if !slices.Contains(AllReportFormats, f) {
+			return fmt.Errorf("unknown --report format %q (valid: %s)", f, joinFormats())
+		}
+	}
+	return nil
 }
 
 func checkMutators(flag string, given, known []string) error {

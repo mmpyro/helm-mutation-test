@@ -16,7 +16,12 @@ const maxMarkdownSurvivors = 40
 func Markdown(run *model.Run) ([]byte, error) {
 	b := &strings.Builder{}
 
-	fmt.Fprintf(b, "## Mutation score: %.1f%%\n\n", run.Score())
+	if run.IsSlice() {
+		fmt.Fprintf(b, "## Slice score (shard %d of %d): %.1f%%\n\n", run.Shard.Index, run.Shard.Count, run.Score())
+		fmt.Fprintf(b, "> ⚠️ %s.\n\n", sliceNotice(run))
+	} else {
+		fmt.Fprintf(b, "## Mutation score: %.1f%%\n\n", run.Score())
+	}
 	fmt.Fprintf(b, "`%s` — %s, %s\n\n", run.ChartName,
 		plural(len(run.Suites), "suite", "suites"), plural(run.TestCount, "test", "tests"))
 
@@ -63,7 +68,7 @@ func Markdown(run *model.Run) ([]byte, error) {
 
 	if run.Capped > 0 {
 		fmt.Fprintf(b, "> ⚠️ `--max-mutants` ran %d of %d generated mutants; %d were not evaluated.\n\n",
-			len(run.Mutants), run.Generated, run.Capped)
+			selectedCount(run), run.Generated, run.Capped)
 	}
 
 	writeMarkdownBreakdown(b, "Score by mutator", run.ByMutator())

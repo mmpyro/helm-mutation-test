@@ -4,19 +4,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mmpyro/helm-mutation-test/internal/config"
 	"github.com/mmpyro/helm-mutation-test/internal/model"
 )
 
-// Filenames written into --report-dir, one per format.
+// Filenames written into --report-dir, one per format. A shard inserts its
+// position after the stem; see FileName.
 const (
-	FileJSON     = "mutation-report.json"
-	FileStryker  = "mutation-report.stryker.json"
-	FileHTML     = "mutation-report.html"
-	FileMarkdown = "mutation-report.md"
-	FileJUnit    = "mutation-report.junit.xml"
+	fileStem     = "mutation-report"
+	FileJSON     = fileStem + ".json"
+	FileStryker  = fileStem + ".stryker.json"
+	FileHTML     = fileStem + ".html"
+	FileMarkdown = fileStem + ".md"
+	FileJUnit    = fileStem + ".junit.xml"
 )
+
+// FileName is the name run's report is written under: name itself, or for a
+// shard "mutation-report.shard-K-of-N" plus name's extension. Shards of one run
+// often land in a single directory — CI artifact steps unpack every job into one
+// folder — and identical names would silently overwrite each other there. The
+// count is in the name too, so a leftover file from a differently split run is
+// visible at a glance rather than only when merge refuses it.
+func FileName(run *model.Run, name string) string {
+	if !run.IsSlice() {
+		return name
+	}
+	return fmt.Sprintf("%s.shard-%d-of-%d%s", fileStem, run.Shard.Index, run.Shard.Count,
+		strings.TrimPrefix(name, fileStem))
+}
 
 // Written records an emitted report file so the CLI can tell the user where to look.
 type Written struct {
@@ -59,7 +76,7 @@ func WriteFiles(run *model.Run, cfg *config.Config) ([]Written, error) {
 		if err != nil {
 			return written, err
 		}
-		path := filepath.Join(cfg.ReportDir, j.name)
+		path := filepath.Join(cfg.ReportDir, FileName(run, j.name))
 		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return written, fmt.Errorf("writing %s: %w", path, err)
 		}

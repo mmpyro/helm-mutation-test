@@ -87,7 +87,9 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 | `--include` | comma-separated globs | `templates/**,values.yaml` | Chart files to mutate |
 | `--exclude` | comma-separated globs | *(none)* | Chart files to skip |
 | `--max-mutants` | int | `0` (no limit) | Evaluate at most this many mutants, sampled deterministically |
-| `--seed` | int | `1` | Sampling seed, for a reproducible `--max-mutants` subset |
+| `--seed` | int | `1` | Sampling seed, for a reproducible `--max-mutants` subset and shard split |
+| `--shard-index` | int | `0` | Evaluate only this shard (1-based) of `--shard-count` |
+| `--shard-count` | int | `0` (no sharding) | Split the mutants into this many disjoint shards, one per CI job |
 | `--no-equivalence-check` | bool | `false` | Skip the post-pass that reclassifies unkillable survivors as `Equivalent` |
 | `--timeout` | duration | `0` → 10× the baseline, at least 30s | Per-mutant timeout |
 
@@ -160,6 +162,51 @@ A sampled score is not comparable to a full one, even when — as above — the 
 match. Use `--max-mutants` for iteration, not for the number you publish.
 
 Negative values are rejected. `0` means no limit.
+
+### `--shard-index`, `--shard-count`
+
+Split one run across CI jobs. Each job evaluates a disjoint slice of the mutants and writes its own
+JSON report; [`merge`](#merge) recombines them into the run one machine would have produced.
+
+```console
+# job k of 4 (GitLab: --shard-index $CI_NODE_INDEX --shard-count $CI_NODE_TOTAL)
+$ helm mutation-test ./my-chart --shard-index 2 --shard-count 4 --report json --report-dir shards
+  Slice  100.0%  ██████████████████████████   (18 killed / 0 survived)
+  shard 2 of 4: 20 of 80 selected mutants evaluated here, 60 in other shards; this is a slice, not a score — merge every shard's JSON report with 'helm mutation-test merge' to grade
+```
+
+Shards use the same `--seed` shuffle as `--max-mutants`: the cap is applied first, then shard *k* takes
+every *M*-th entry of the shuffled list. So the shards together cover exactly the mutants an unsharded
+run would evaluate, each one samples the whole chart rather than a run of files, and their sizes differ
+by at most one. Every shard of a run must be given the same chart, flags and `--seed`.
+
+A shard's score covers its slice only, and every format labels it so. **`--threshold` is refused
+together with `--shard-count`**: gate on `merge --threshold` instead. Shards exit 0 unless they cannot
+run (2).
+
+A shard names its report files for its position — `mutation-report.shard-2-of-4.json` rather than
+`mutation-report.json` — so every shard can write into the same directory, and CI can unpack all jobs'
+artifacts into one folder without one shard overwriting another. Unsharded and merged runs keep the
+plain names.
+
+Indices are 1-based. `--shard-count 1`, or neither flag, means an ordinary unsharded run.
+
+### `merge`
+
+```console
+$ helm mutation-test merge shards/mutation-report.shard-*.json --threshold 70 \
+    --report console,markdown,html --report-dir ./mutation
+```
+
+Reads every shard's JSON report, then reports and grades the union exactly as a single run would:
+same mutants, same order, same tally. It takes `--report`, `--report-dir`, `--threshold`,
+`--color`/`--no-color`, and `--chart` (where to read chart source for the HTML report; defaults to the
+path the shards recorded, which may not exist on the merging machine).
+
+It refuses, with exit 2, anything that would make the merged report cover less than it claims: a
+missing or repeated shard, a report that is not a shard, shards whose `--shard-count`, `--seed`, chart,
+mutators or `--max-mutants` differ, a mutant in two shards, or shards whose mutants do not add up to
+what the run selected. Exit codes are otherwise those of a normal run.
 
 ### `--no-equivalence-check`
 
@@ -272,7 +319,8 @@ $ helm mutation-test ./my-chart --report json --report-dir ./out
 
 `--report-dir` is created if missing, and **only** when a non-console format was requested — a plain
 `helm mutation-test ./my-chart` leaves no `.helm-mutation-test` directory behind. Filenames are
-fixed:
+fixed, except that a shard inserts its position after the stem
+(`mutation-report.shard-2-of-4.json`; see [`--shard-index`](#--shard-index---shard-count)):
 
 | format | file(s) written |
 |---|---|
@@ -365,6 +413,7 @@ Code 2 covers, verified:
 - no suite matching `-f`, or matching suites with no test jobs;
 - a chart path that does not exist or does not load;
 - any flag validation failure;
+- `merge` given an incomplete, inconsistent or unreadable set of shard reports;
 - wrong number of positional arguments;
 - a report file that could not be written.
 
@@ -382,6 +431,10 @@ Configuration is validated before the baseline runs, so a typo costs no time. Al
 | `--max-mutants` < 0 | `--max-mutants cannot be negative, got N` |
 | `--threshold` outside `[0,100]` | `--threshold must be between 0 and 100, got N` |
 | `--timeout` < 0 | `--timeout cannot be negative, got N` |
+| `--shard-index` without `--shard-count` | `--shard-index needs --shard-count` |
+| `--shard-count` > 1 without `--shard-index` | `--shard-count needs --shard-index (1 to M)` |
+| `--shard-index` outside `1..M` | `--shard-index must be between 1 and M, got N` |
+| `--threshold` with `--shard-count` > 1 | `--threshold cannot be used with --shard-count: a shard is a slice, not a score; ...` |
 | bad `--kill-attribution` | `--kill-attribution must be "first" or "all", got "X"` |
 | bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit)` |
 | bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)` |
@@ -399,6 +452,8 @@ Error: loading chart ./nope: stat ./nope: no such file or directory
 ```
 
 ## Hidden and generated subcommands
+
+- `merge`: not hidden; see [`merge`](#merge).
 
 - `__worker` — hidden. The parent process re-executes the binary with this argument to spawn an
   evaluation worker. Not for direct use.

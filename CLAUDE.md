@@ -25,7 +25,7 @@ make integration-tests  # black-box CLI tests: exit codes, all five report forma
 
 `make test` does not include the integration suite: `test/integration` is behind a
 `//go:build integration` tag so the inner loop stays fast. Run it with
-`make integration-tests` (~11s), which builds its own binary from source rather
+`make integration-tests` (~20s), which builds its own binary from source rather
 than trusting whatever is in `bin/`.
 
 The `runner` package tests take ~3min under `-race` because they spawn worker
@@ -83,6 +83,16 @@ Everything else — no-coverage, invalid, timeout, error, and anything dropped b
 `--max-mutants` — is excluded from the score *and named explicitly in every report
 format*. A silently truncated or filtered run would read as full coverage. If you
 add a status or a cap, surface it in all five formats.
+
+**A shard is a slice, not a score.** `--shard-index/--shard-count` reuse
+`--max-mutants`' seeded shuffle (`mutator.CapAndShard`: cap first, then every M-th
+entry), so shards partition exactly the unsharded selection. A shard's report sets
+`Run.Shard`, every format labels its score a slice (`report/shard.go`), and config
+refuses `--threshold` with `--shard-count > 1`. Grading happens on `merge`, whose
+input is the JSON report (`report.ReadJSON`) and which refuses any incomplete or
+inconsistent set: `model.Merge` checks that the mutants add up to
+`Generated − Capped` rather than trusting shard metadata. A new `Run` field merge
+depends on must round-trip through `ReadJSON` — `TestReadJSONRoundTrips` pins it.
 
 **`Equivalent` is the fourth excluded status**, alongside no-coverage, invalid and
 the mutation-control caps: a mutation that provably cannot change any rendered

@@ -222,9 +222,16 @@ func (r result) file(t *testing.T, name string) []byte {
 
 func (r result) JSON(t *testing.T) jsonReport {
 	t.Helper()
+	return r.jsonFile(t, "mutation-report.json")
+}
+
+// jsonFile reads a JSON report by name, for a shard's, which carries its
+// position in the file name.
+func (r result) jsonFile(t *testing.T, name string) jsonReport {
+	t.Helper()
 	var out jsonReport
-	if err := json.Unmarshal(r.file(t, "mutation-report.json"), &out); err != nil {
-		t.Fatalf("mutation-report.json is not valid JSON: %v", err)
+	if err := json.Unmarshal(r.file(t, name), &out); err != nil {
+		t.Fatalf("%s is not valid JSON: %v", name, err)
 	}
 	return out
 }
@@ -265,17 +272,23 @@ type jsonReport struct {
 	Passed    bool    `json:"passed"`
 	Tally     tally   `json:"tally"`
 	// EquivalenceChecked and EquivalenceUnchecked drive junitNotices below.
-	EquivalenceChecked   bool        `json:"equivalenceChecked"`
-	EquivalenceUnchecked int         `json:"equivalenceUnchecked"`
-	Generated            int         `json:"generated"`
-	Capped               int         `json:"capped"`
-	Mutators             []string    `json:"mutators"`
-	Suites               []suiteInfo `json:"suites"`
-	TestCount            int         `json:"testCount"`
-	ByMutator            []breakdown `json:"byMutator"`
-	ByFile               []breakdown `json:"byFile"`
-	Mutants              []mutant    `json:"mutants"`
-	Timing               struct {
+	EquivalenceChecked   bool `json:"equivalenceChecked"`
+	EquivalenceUnchecked int  `json:"equivalenceUnchecked"`
+	Generated            int  `json:"generated"`
+	Capped               int  `json:"capped"`
+	Shard                *struct {
+		Index       int   `json:"index"`
+		Count       int   `json:"count"`
+		OtherShards int   `json:"otherShards"`
+		Seed        int64 `json:"seed"`
+	} `json:"shard"`
+	Mutators  []string    `json:"mutators"`
+	Suites    []suiteInfo `json:"suites"`
+	TestCount int         `json:"testCount"`
+	ByMutator []breakdown `json:"byMutator"`
+	ByFile    []breakdown `json:"byFile"`
+	Mutants   []mutant    `json:"mutants"`
+	Timing    struct {
 		BaselineMillis int64 `json:"baselineMillis"`
 		TotalMillis    int64 `json:"totalMillis"`
 	} `json:"timing"`

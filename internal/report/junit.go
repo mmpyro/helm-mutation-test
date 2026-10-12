@@ -87,6 +87,13 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Tests++
 		suites.Skipped++
 	}
+	// A shard's results are a slice of the run. Prepended last so it is the very
+	// first suite a CI UI shows: it qualifies every other number in the file.
+	if run.IsSlice() {
+		suites.Suites = append([]junitSuite{shardNotice(run)}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
 
 	suites.Time = fmt.Sprintf("%.4f", run.Duration.Seconds())
 
@@ -150,6 +157,24 @@ func cappedNotice(run *model.Run) junitSuite {
 				"%d of %d generated mutants were not evaluated (--max-mutants); "+
 					"this run is a sample, not full coverage",
 				run.Capped, run.Generated)},
+		}},
+	}
+}
+
+// shardNotice makes a shard visible in the XML, the same way cappedNotice does
+// for --max-mutants: a CI UI fed one shard's file would otherwise show its
+// passes and failures as the whole chart's.
+func shardNotice(run *model.Run) junitSuite {
+	return junitSuite{
+		Name:     "--shard-index",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      fmt.Sprintf("shard %d of %d", run.Shard.Index, run.Shard.Count),
+			ClassName: "--shard-index",
+			Time:      "0.0000",
+			Skipped:   &junitSkipped{Message: sliceNotice(run)},
 		}},
 	}
 }

@@ -10,12 +10,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	"github.com/mmpyro/helm-mutation-test/internal/config"
+	"github.com/mmpyro/helm-mutation-test/internal/model"
 	"github.com/mmpyro/helm-mutation-test/internal/mutator"
 	"github.com/mmpyro/helm-mutation-test/internal/report"
 	"github.com/mmpyro/helm-mutation-test/internal/runner"
@@ -101,6 +103,10 @@ Examples:
 
   # A fast subset while iterating on tests
   helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
+
+  # Split across four CI jobs, then grade the merged result
+  helm mutation-test ./my-chart --shard-index 2 --shard-count 4 --report json --report-dir ./shards
+  helm mutation-test merge ./shards/mutation-report.shard-*.json --threshold 70
 `),
 		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
@@ -140,7 +146,12 @@ Examples:
 	f.StringSliceVar(&cfg.Exclude, "exclude", nil, "chart files to skip")
 	f.IntVar(&cfg.MaxMutants, "max-mutants", 0,
 		"evaluate at most this many mutants, sampled deterministically (0 = no limit)")
-	f.Int64Var(&cfg.Seed, "seed", cfg.Seed, "sampling seed, for a reproducible --max-mutants subset")
+	f.Int64Var(&cfg.Seed, "seed", cfg.Seed,
+		"sampling seed, for a reproducible --max-mutants subset and shard split; every shard must use the same one")
+	f.IntVar(&cfg.ShardIndex, "shard-index", 0,
+		"evaluate only this shard (1-based) of --shard-count; combine the shards' JSON reports with 'merge'")
+	f.IntVar(&cfg.ShardCount, "shard-count", 0,
+		"split the mutants into this many disjoint shards, one per CI job (0 or 1 = no sharding)")
 	// pflag has no native negated bool, so bind the negation and invert it after
 	// parsing. Keep backticks out of the usage string: pflag's UnquoteUsage turns
 	// the first backquoted run into the flag's displayed value type.
@@ -166,6 +177,7 @@ Examples:
 	f.BoolVar(&cfg.KeepWorkdir, "keep-workdir", false,
 		"keep the temporary chart copies for inspection")
 
+	cmd.AddCommand(newMergeCmd())
 	cmd.AddCommand(&cobra.Command{
 		Use:    "__worker",
 		Hidden: true,
@@ -200,6 +212,12 @@ func run(cmd *cobra.Command, cfg *config.Config) error {
 		return &codedError{exitCannotRun, err}
 	}
 
+	return emit(out, result, cfg)
+}
+
+// emit renders every requested report and then applies the threshold. Shared by
+// a mutation run and by merge, so both grade and exit identically.
+func emit(out io.Writer, result *model.Run, cfg *config.Config) error {
 	if cfg.WantsReport(config.ReportConsole) {
 		if err := report.Console(out, result, *cfg.Color); err != nil {
 			return &codedError{exitCannotRun, err}
@@ -266,4 +284,82 @@ func indentList(lines []string) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func newMergeCmd() *cobra.Command {
+	cfg := config.Defaults()
+	var (
+		reports  []string
+		colour   bool
+		noColour bool
+		chart    string
+	)
+	cmd := &cobra.Command{
+		Use:   "merge [flags] REPORT.json...",
+		Short: "Combine the JSON reports of a sharded run into one graded run",
+		Long: strings.TrimSpace(`
+Combine the JSON reports of every shard of a run split with --shard-index and
+--shard-count, and report and grade the result as if it had run on one machine.
+
+A single shard's score covers only its slice of the mutants, so this is the
+report to gate CI on. The merge refuses an incomplete or inconsistent set:
+a missing or repeated shard, shards run with a different --seed, --shard-count,
+--max-mutants, mutator set or chart, or shards whose mutants do not add up to
+what the run selected. A merge that silently dropped a shard would read as full
+coverage.
+
+Examples:
+  helm mutation-test merge ./shards/mutation-report.shard-*.json --threshold 70 \
+    --report console,markdown,html --report-dir ./mutation
+`),
+		Args:         cobra.MinimumNArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg.Reports = parseReports(reports)
+			cfg.Color = resolveColour(colour, noColour)
+			if err := validateMergeConfig(&cfg); err != nil {
+				return &codedError{exitCannotRun, err}
+			}
+			shards := make([]*model.Run, 0, len(args))
+			for _, path := range args {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return &codedError{exitCannotRun, err}
+				}
+				run, err := report.ReadJSON(data)
+				if err != nil {
+					return &codedError{exitCannotRun, fmt.Errorf("%s: %w", path, err)}
+				}
+				shards = append(shards, run)
+			}
+			merged, err := model.Merge(shards, cfg.Threshold)
+			if err != nil {
+				return &codedError{exitCannotRun, fmt.Errorf("cannot merge: %w", err)}
+			}
+			if chart != "" {
+				merged.ChartPath = chart
+			}
+			return emit(cmd.OutOrStdout(), merged, &cfg)
+		},
+	}
+	f := cmd.Flags()
+	f.StringSliceVar(&reports, "report", []string{string(config.ReportConsole)},
+		"report formats: console, json, html, markdown, junit")
+	f.StringVar(&cfg.ReportDir, "report-dir", cfg.ReportDir, "directory for file reports")
+	f.Float64Var(&cfg.Threshold, "threshold", 0,
+		"exit 1 if the merged mutation score is below this percentage (0 disables the check)")
+	f.StringVar(&chart, "chart", "",
+		"chart directory to read source from for the HTML report (default: the path the shards recorded)")
+	f.BoolVar(&colour, "color", false, "force coloured output even when stdout is not a terminal")
+	f.BoolVar(&noColour, "no-color", false, "disable coloured output")
+	return cmd
+}
+
+// validateMergeConfig checks the few options merge takes. It cannot reuse
+// Config.Validate, which requires a chart and checks mutation-run flags.
+func validateMergeConfig(cfg *config.Config) error {
+	if cfg.Threshold < 0 || cfg.Threshold > 100 {
+		return fmt.Errorf("--threshold must be between 0 and 100, got %v", cfg.Threshold)
+	}
+	return config.CheckReports(cfg.Reports)
 }

@@ -171,6 +171,10 @@ type Run struct {
 	// Capped is how many mutants the cap discarded. Reported explicitly: a silent
 	// truncation would read as full coverage.
 	Capped int `json:"capped"`
+	// Shard is set when this run evaluated one slice of a split run. Its score
+	// covers that slice only; it is not the chart's mutation score until every
+	// shard is merged. Nil for an unsharded or merged run.
+	Shard *Shard `json:"shard,omitempty"`
 	// EquivalenceChecked records whether the equivalence pass ran. Without it,
 	// "equivalent 0" is ambiguous between "checked and found none" and "never
 	// looked", and the second reads as the first.
@@ -187,6 +191,23 @@ type Run struct {
 	Duration         time.Duration `json:"durationNanos"`
 	Threshold        float64       `json:"threshold"`
 }
+
+// Shard identifies one slice of a run split with --shard-index/--shard-count.
+type Shard struct {
+	// Index is 1-based.
+	Index int `json:"index"`
+	Count int `json:"count"`
+	// OtherShards is how many selected mutants other shards evaluate. Reported
+	// explicitly for the same reason as Capped.
+	OtherShards int `json:"otherShards"`
+	// Seed is the shuffle seed. Shards only partition the same mutant set when
+	// they share it, so merge refuses a mix.
+	Seed int64 `json:"seed"`
+}
+
+// IsSlice reports whether this run is one shard of a split run, whose score is
+// not a mutation score.
+func (r *Run) IsSlice() bool { return r.Shard != nil }
 
 // Score is the run's mutation score in [0,100].
 func (r *Run) Score() float64 { return r.Tally.Score() }

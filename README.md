@@ -91,6 +91,10 @@ helm mutation-test ./my-chart --threshold 70 \
 
 # A fast subset while iterating on tests
 helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
+
+# Split a big chart across CI jobs, then grade the merged result
+helm mutation-test ./my-chart --shard-index 2 --shard-count 4 --report json --report-dir shards
+helm mutation-test merge shards/mutation-report.shard-*.json --threshold 70
 ```
 
 ### Reading the output
@@ -163,7 +167,8 @@ folding it in would flatter the number:
 | **Error** | The tool itself failed on that mutant. |
 
 `--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
-coverage. `--no-equivalence-check` disables the equivalence pass; every format states when that
+coverage. For the same reason a `--shard-count` shard labels its score a slice in every format, refuses
+`--threshold`, and only the `merge` of every shard is graded. `--no-equivalence-check` disables the equivalence pass; every format states when that
 happened, the same way it states a truncation.
 
 ## Reports

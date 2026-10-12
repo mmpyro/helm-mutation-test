@@ -228,6 +228,16 @@ file formats are summaries — this is the one to parse if you want to build som
 The wire shape is `"schema": "helm-mutation-test/v1"` and is deliberately a separate type from the
 internal model, so refactors do not silently change the published format.
 
+It is also the input to `helm mutation-test merge`. A shard's report carries one extra top-level
+object, absent from unsharded and merged reports, and its `score` covers that slice only:
+
+```json
+"shard": { "index": 2, "count": 4, "otherShards": 60, "seed": 1 }
+```
+
+A shard writes it as `mutation-report.shard-K-of-N.json`, so shards sharing a directory do not
+overwrite each other.
+
 ### Top level (real, from the strong-suite run)
 
 ```json
@@ -408,8 +418,8 @@ jq -r '.mutants[] | select(.status=="NoCoverage") | .file' mutation-report.json 
 # Equivalent mutants, with the evidence for each
 jq -r '.mutants[] | select(.status=="Equivalent") | "\(.file):\(.line)\t\(.detail)"' mutation-report.json
 
-# Confirm nothing was silently dropped
-jq '{generated, capped, evaluated: (.mutants|length)}' mutation-report.json
+# Confirm nothing was silently dropped (on a shard, other shards hold the rest)
+jq '{generated, capped, otherShards: (.shard.otherShards // 0), evaluated: (.mutants|length)}' mutation-report.json
 
 # Confirm the equivalence pass actually ran, rather than being skipped, and that
 # it reached a verdict on every survivor
