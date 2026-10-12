@@ -89,6 +89,9 @@ helm mutation-test ./my-chart
 helm mutation-test ./my-chart --threshold 70 \
   --report console,markdown,html,junit --report-dir ./mutation
 
+# Per-PR: score only what the branch changed (needs fetch-depth: 0 in CI)
+helm mutation-test ./my-chart --since origin/main --threshold 70
+
 # A fast subset while iterating on tests
 helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
 ```
@@ -163,7 +166,9 @@ folding it in would flatter the number:
 | **Error** | The tool itself failed on that mutant. |
 
 `--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
-coverage. `--no-equivalence-check` disables the equivalence pass; every format states when that
+coverage. `--since` does the same for the mutants outside the diff, and falls back to a full run —
+saying why — when a change such as `values.yaml` or a partial cannot be attributed to particular
+templates. `--no-equivalence-check` disables the equivalence pass; every format states when that
 happened, the same way it states a truncation.
 
 ## Reports
@@ -247,4 +252,5 @@ make demo    # score the fixture chart with both suites
   glob (`-f 'tests/**/*_test.yaml'`).
 - A suite file that fails to parse aborts the run, matching helm-unittest's own behaviour.
 - Mutation is one change at a time; no higher-order mutants.
-- No incremental mode yet: every run evaluates the full mutant set unless `--max-mutants` is given.
+- `--since` treats any change it cannot attribute (values, partials, `Chart.yaml`, subcharts, files
+  read via `.Files.Get`) as a reason for a full run, so PRs touching shared files gain no speedup.

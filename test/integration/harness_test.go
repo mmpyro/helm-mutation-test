@@ -275,7 +275,16 @@ type jsonReport struct {
 	ByMutator            []breakdown `json:"byMutator"`
 	ByFile               []breakdown `json:"byFile"`
 	Mutants              []mutant    `json:"mutants"`
-	Timing               struct {
+	Incremental          *struct {
+		Base           string   `json:"base"`
+		BaseCommit     string   `json:"baseCommit"`
+		FilesChanged   []string `json:"filesChanged"`
+		FilesInspected int      `json:"filesInspected"`
+		FilesSkipped   int      `json:"filesSkipped"`
+		MutantsSkipped int      `json:"mutantsSkipped"`
+		FullRunReason  string   `json:"fullRunReason"`
+	} `json:"incremental"`
+	Timing struct {
 		BaselineMillis int64 `json:"baselineMillis"`
 		TotalMillis    int64 `json:"totalMillis"`
 	} `json:"timing"`
@@ -384,6 +393,9 @@ func (j jsonReport) junitNotices() int {
 		n++
 	}
 	if j.EquivalenceUnchecked > 0 {
+		n++
+	}
+	if j.Incremental != nil {
 		n++
 	}
 	return n

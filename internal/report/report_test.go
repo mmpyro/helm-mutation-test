@@ -204,6 +204,78 @@ func TestEveryFormatSaysWhenEquivalenceWasNotChecked(t *testing.T) {
 	}
 }
 
+// ---------- incremental (cross-format) ----------
+
+func incrementalRun() *model.Run {
+	run := sampleRun()
+	run.Capped = 0
+	run.Incremental = &model.Incremental{
+		Base: "main", BaseCommit: "abc123",
+		FilesChanged:   []string{"templates/service.yaml"},
+		FilesInspected: 1, FilesSkipped: 7, MutantsSkipped: 412,
+	}
+	return run
+}
+
+// A diff-only score that does not say so reads as a score over the whole chart.
+// Same rule as --max-mutants: every format names what was left out.
+func TestEveryFormatSaysTheScoreCoversTheDiffOnly(t *testing.T) {
+	for _, tc := range allFormats(t, incrementalRun()) {
+		if tc.name == "json" {
+			for _, want := range []string{`"incremental"`, `"base": "main"`, `"mutantsSkipped": 412`,
+				`"filesChanged"`, `"templates/service.yaml"`} {
+				if !strings.Contains(tc.output, want) {
+					t.Errorf("json lacks %s:\n%s", want, tc.output)
+				}
+			}
+			continue
+		}
+		for _, want := range []string{"--since main", "412", "score covers the diff only"} {
+			if !strings.Contains(tc.output, want) {
+				t.Errorf("%s does not say %q:\n%s", tc.name, want, tc.output)
+			}
+		}
+	}
+}
+
+// A fallback must say why it ran everything, or a slow --since run looks broken.
+func TestEveryFormatNamesTheFullRunReason(t *testing.T) {
+	run := incrementalRun()
+	run.Incremental.FullRunReason = "values.yaml changed, and any template may read any value"
+	run.Incremental.MutantsSkipped = 0
+	for _, tc := range allFormats(t, run) {
+		if !strings.Contains(tc.output, "values.yaml changed") {
+			t.Errorf("%s does not name the full-run reason:\n%s", tc.name, tc.output)
+		}
+		if tc.name != "json" && strings.Contains(tc.output, "diff only") {
+			t.Errorf("%s claims a diff-only score for a full run:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
+// An exit 0 over an empty diff must be explained, not look like a passing score.
+func TestEveryFormatSaysWhenTheDiffHadNothingToScore(t *testing.T) {
+	run := incrementalRun()
+	run.Mutants = nil
+	run.ComputeTally()
+	for _, tc := range allFormats(t, run) {
+		if tc.name == "json" {
+			continue // the block plus a zero tally carry it
+		}
+		if !strings.Contains(tc.output, "nothing in the diff to score; threshold not applied") {
+			t.Errorf("%s does not explain the empty diff:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
+func TestFullRunsCarryNoIncrementalNotice(t *testing.T) {
+	for _, tc := range allFormats(t, sampleRun()) {
+		if strings.Contains(tc.output, "--since") || strings.Contains(tc.output, `"incremental"`) {
+			t.Errorf("%s mentions incremental mode on a full run:\n%s", tc.name, tc.output)
+		}
+	}
+}
+
 // ---------- console ----------
 
 func TestConsoleShowsScoreAndSurvivors(t *testing.T) {

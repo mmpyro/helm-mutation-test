@@ -88,6 +88,13 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Skipped++
 	}
 
+	// A diff-only run reads as a full one in a CI UI unless it says otherwise.
+	if run.Incremental != nil {
+		suites.Suites = append([]junitSuite{incrementalNotice(run)}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
+
 	suites.Time = fmt.Sprintf("%.4f", run.Duration.Seconds())
 
 	body, err := xml.MarshalIndent(suites, "", "  ")
@@ -149,7 +156,7 @@ func cappedNotice(run *model.Run) junitSuite {
 			Skipped: &junitSkipped{Message: fmt.Sprintf(
 				"%d of %d generated mutants were not evaluated (--max-mutants); "+
 					"this run is a sample, not full coverage",
-				run.Capped, run.Generated)},
+				run.Capped, run.Considered())},
 		}},
 	}
 }
@@ -192,6 +199,22 @@ func equivalenceUncheckedNotice(run *model.Run) junitSuite {
 				"%d survivors could not be checked for equivalence and may be unkillable; "+
 					"each one's reason is in its detail",
 				run.EquivalenceUnchecked)},
+		}},
+	}
+}
+
+// incrementalNotice records what a --since run left out, or why it ran in full.
+func incrementalNotice(run *model.Run) junitSuite {
+	return junitSuite{
+		Name:     "--since",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      "changed-files mode",
+			ClassName: "--since",
+			Time:      "0.0000",
+			Skipped:   &junitSkipped{Message: strings.Join(incrementalNotices(run), "; ")},
 		}},
 	}
 }

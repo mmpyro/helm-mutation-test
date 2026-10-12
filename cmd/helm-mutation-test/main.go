@@ -99,6 +99,9 @@ Examples:
   helm mutation-test ./my-chart --threshold 70 \
     --report console,markdown,html,junit --report-dir ./mutation
 
+  # Per-PR CI: score only what the branch changed
+  helm mutation-test ./my-chart --since origin/main --threshold 70
+
   # A fast subset while iterating on tests
   helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
 `),
@@ -141,6 +144,9 @@ Examples:
 	f.IntVar(&cfg.MaxMutants, "max-mutants", 0,
 		"evaluate at most this many mutants, sampled deterministically (0 = no limit)")
 	f.Int64Var(&cfg.Seed, "seed", cfg.Seed, "sampling seed, for a reproducible --max-mutants subset")
+	f.StringVar(&cfg.Since, "since", "",
+		"only score mutants the changes since this git ref could affect (merge-base to working tree);\n"+
+			"values.yaml, partials and other shared files fall back to a full run")
 	// pflag has no native negated bool, so bind the negation and invert it after
 	// parsing. Keep backticks out of the usage string: pflag's UnquoteUsage turns
 	// the first backquoted run into the flag's displayed value type.

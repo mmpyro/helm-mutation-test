@@ -166,3 +166,29 @@ func TestEquivalentTallyAndAccessor(t *testing.T) {
 		t.Fatalf("Equivalent() = %+v", got)
 	}
 }
+
+// A PR that touches no mutable chart file grades nothing; failing it on a
+// threshold would make every unrelated change pay for an empty check.
+func TestIncrementalRunWithNothingScoredMeetsThreshold(t *testing.T) {
+	r := Run{Threshold: 70, Incremental: &Incremental{Base: "main"},
+		Mutants: []Mutant{{ID: "1", Status: StatusNoCoverage}}}
+	r.ComputeTally()
+	if !r.NothingToScore() || !r.MeetsThreshold() {
+		t.Fatal("an incremental run with nothing scored must pass the threshold")
+	}
+}
+
+// The exemption is for an empty diff only. A full run that scored nothing has
+// a real problem, and an incremental run that did score is graded as usual.
+func TestNothingToScoreExemptionIsNarrow(t *testing.T) {
+	full := Run{Threshold: 70}
+	if full.NothingToScore() || full.MeetsThreshold() {
+		t.Fatal("a full run with nothing scored must still fail the threshold")
+	}
+	scored := Run{Threshold: 70, Incremental: &Incremental{Base: "main"},
+		Mutants: []Mutant{{ID: "1", Status: StatusSurvived}}}
+	scored.ComputeTally()
+	if scored.NothingToScore() || scored.MeetsThreshold() {
+		t.Fatal("an incremental run with a 0% score must fail the threshold")
+	}
+}

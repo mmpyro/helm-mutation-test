@@ -60,6 +60,7 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | `internal/source` | Load chart files; locate mutations via parser, apply as byte edits |
 | `internal/mutator` | The 9 mutators + registry + deterministic plan generation |
 | `internal/coverage` | Map a chart file to the suites that render it. Dependency-free by design |
+| `internal/incremental` | `--since`: list changed files via git, classify them into a selection. Dependency-free |
 | `internal/workspace` | Per-worker chart copies; write/restore a mutation |
 | `internal/runner` | helm-unittest seam, baseline gate, executor, classification, session |
 | `internal/equivalence` | Decide whether a mutation can change any rendered manifest. Imports Helm, never `runner`. |
@@ -114,6 +115,15 @@ helm unittest -f 'tests/strong_test.yaml' /tmp/probe   # should be killed
 If it survives one and is killed by the other, it is a useful mutant — do not guard
 it. The only justified guard is `include`/`template` target strings, which genuinely
 error. Watch the invalid rate: `TestInvalidMutantRateIsLow` fails above 20%.
+
+**`--since` narrows only what it can attribute.** `internal/incremental.Classify` keeps a changed
+non-partial template's own mutants and every file a changed suite covers; *any* other changed chart
+path forces a full run, with the path named in `Run.Incremental.FullRunReason`. An unrecognised file
+might be read through `.Files.Get`, so ignoring it would skip mutants whose verdict may have moved.
+Like `--max-mutants`, the skipped count is named in all five formats via
+`report.incrementalNotices`. `internal/incremental` imports nothing from this module, like
+`coverage`. A `--since` run that scores nothing passes `--threshold` (`Run.NothingToScore`); a full
+run that scores nothing still fails.
 
 **Baseline failure is a hard stop, not a warning.** A score over a red suite is a
 fiction. Exit code 2.
@@ -260,5 +270,5 @@ error messages, `docs/reports.md`'s JSON sample, and
 
 ## Out of scope for now
 
-Incremental / changed-files-only mode, SARIF output, mutant caching across runs,
+SARIF output, mutant caching across runs,
 higher-order mutants, subchart-aware scoring.

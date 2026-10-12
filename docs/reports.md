@@ -284,8 +284,27 @@ survivor these breakdowns could otherwise have shown.)*
 Field notes:
 
 - `score` is rounded to two places. `passed` reflects `--threshold`; with no threshold it is `true`.
-- `generated` is the count **before** any `--max-mutants` cap; `capped` is how many were dropped.
-  `generated - capped == len(mutants)`.
+- `generated` is the count **before** any `--max-mutants` cap or `--since` narrowing; `capped` is how
+  many the cap dropped. `generated - incremental.mutantsSkipped - capped == len(mutants)`
+  (`mutantsSkipped` is 0 without `--since`).
+- `incremental` is present only for a `--since` run:
+
+  ```json
+  "incremental": {
+    "base": "origin/main",
+    "baseCommit": "fd15dca…",
+    "filesChanged": ["templates/service.yaml"],
+    "filesInspected": 1,
+    "filesSkipped": 7,
+    "mutantsSkipped": 412,
+    "fullRunReason": ""
+  }
+  ```
+
+  `filesChanged` is every chart-relative path in the diff; `filesInspected`/`filesSkipped` count
+  mutable files; `fullRunReason` (omitted when empty) names the change that forced a full run, in
+  which case `mutantsSkipped` is 0. Every other format prints the same facts as one line, and
+  JUnit as a prepended `--since` skipped testcase.
 - `byMutator` and `byFile` are sorted ascending by score.
 - `equivalenceChecked` distinguishes a run where the pass found no equivalent mutants from one where
   `--no-equivalence-check` skipped it entirely — `tally.equivalent == 0` is ambiguous on its own.
@@ -409,7 +428,7 @@ jq -r '.mutants[] | select(.status=="NoCoverage") | .file' mutation-report.json 
 jq -r '.mutants[] | select(.status=="Equivalent") | "\(.file):\(.line)\t\(.detail)"' mutation-report.json
 
 # Confirm nothing was silently dropped
-jq '{generated, capped, evaluated: (.mutants|length)}' mutation-report.json
+jq '{generated, capped, diffSkipped: (.incremental.mutantsSkipped // 0), evaluated: (.mutants|length)}' mutation-report.json
 
 # Confirm the equivalence pass actually ran, rather than being skipped, and that
 # it reached a verdict on every survivor
