@@ -250,7 +250,7 @@ Any value other than `first` or `all` is rejected.
 
 | flag | type | default | purpose |
 |---|---|---|---|
-| `--report` | comma-separated list | `console` | Report formats: `console`, `json`, `html`, `markdown`, `junit` |
+| `--report` | comma-separated list | `console` | Report formats: `console`, `json`, `html`, `markdown`, `junit`, `sarif` |
 | `--report-dir` | string | `.helm-mutation-test` | Directory for file reports |
 | `--threshold` | float | `0` (disabled) | Exit 1 if the mutation score is below this percentage |
 | `--color` | bool | `false` | Force coloured output even when stdout is not a terminal |
@@ -280,6 +280,7 @@ fixed:
 | `json` | `mutation-report.json` |
 | `markdown` | `mutation-report.md` |
 | `junit` | `mutation-report.junit.xml` |
+| `sarif` | `mutation-report.sarif` |
 | `html` | `mutation-report.html` **and** `mutation-report.stryker.json` |
 
 `html` writes two files on purpose: the standard-schema JSON is useful on its own, since that is what
@@ -289,7 +290,7 @@ An unknown format is rejected before the run:
 
 ```console
 $ helm mutation-test ./my-chart --report bogus
-Error: unknown --report format "bogus" (valid: console, json, html, markdown, junit)
+Error: unknown --report format "bogus" (valid: console, json, html, markdown, junit, sarif)
 ```
 
 ### `--threshold`
@@ -383,7 +384,7 @@ Configuration is validated before the baseline runs, so a typo costs no time. Al
 | `--threshold` outside `[0,100]` | `--threshold must be between 0 and 100, got N` |
 | `--timeout` < 0 | `--timeout cannot be negative, got N` |
 | bad `--kill-attribution` | `--kill-attribution must be "first" or "all", got "X"` |
-| bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit)` |
+| bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit, sarif)` |
 | bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)` |
 | bad `--exclude-mutators` | as above, prefixed `--exclude-mutators:` |
 

@@ -120,9 +120,9 @@ func sampleRun() *model.Run {
 // is tolerated (see TestStrykerToleratesUnreadableSource).
 const allFormatsChartDir = "testdata/allformats-fixture"
 
-// allFormats renders run through every one of the five report formats, so a
+// allFormats renders run through every one of the six report formats, so a
 // property that must hold across all of them can be checked in one loop
-// instead of five near-identical tests.
+// instead of six near-identical tests.
 func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 	t.Helper()
 	var out []struct{ name, output string }
@@ -157,6 +157,12 @@ func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 	}
 	out = append(out, struct{ name, output string }{"html", string(html)})
 
+	sa, err := SARIF(run)
+	if err != nil {
+		t.Fatalf("SARIF: %v", err)
+	}
+	out = append(out, struct{ name, output string }{"sarif", string(sa)})
+
 	return out
 }
 
@@ -164,7 +170,7 @@ func allFormats(t *testing.T, run *model.Run) []struct{ name, output string } {
 
 func TestEveryFormatNamesEquivalentMutants(t *testing.T) {
 	// An exclusion no format mentions reads as full coverage to anyone looking at
-	// that format. Equivalent joins no-coverage and invalid in all five.
+	// that format. Equivalent joins no-coverage and invalid in all six.
 	run := &model.Run{
 		ChartName:          "sample",
 		EquivalenceChecked: true,
@@ -832,7 +838,7 @@ func TestWriteFilesEmitsEveryRequestedFormat(t *testing.T) {
 	cfg.ReportDir = filepath.Join(dir, "out")
 	cfg.Reports = []config.ReportFormat{
 		config.ReportConsole, config.ReportJSON, config.ReportHTML,
-		config.ReportMarkdown, config.ReportJUnit,
+		config.ReportMarkdown, config.ReportJUnit, config.ReportSARIF,
 	}
 
 	written, err := WriteFiles(run, &cfg)
@@ -840,10 +846,10 @@ func TestWriteFilesEmitsEveryRequestedFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// HTML also emits its standard-schema JSON, which other tooling consumes.
-	if len(written) != 5 {
-		t.Errorf("got %d files, want 5: %+v", len(written), written)
+	if len(written) != 6 {
+		t.Errorf("got %d files, want 6: %+v", len(written), written)
 	}
-	for _, name := range []string{FileJSON, FileMarkdown, FileJUnit, FileHTML, FileStryker} {
+	for _, name := range []string{FileJSON, FileMarkdown, FileJUnit, FileHTML, FileStryker, FileSARIF} {
 		path := filepath.Join(cfg.ReportDir, name)
 		info, err := os.Stat(path)
 		if err != nil {
@@ -985,6 +991,9 @@ func TestEveryFormatNamesUncheckedSurvivors(t *testing.T) {
 		},
 		"json": func(r *model.Run) (string, error) {
 			b, err := JSON(r)
+			return string(b), err
+		}, "sarif": func(r *model.Run) (string, error) {
+			b, err := SARIF(r)
 			return string(b), err
 		},
 	}
