@@ -83,7 +83,11 @@ func writeScore(b *strings.Builder, run *model.Run, c colours) {
 		// Never let a truncated run read as full coverage.
 		fmt.Fprintf(b, "  %s\n", c.warn(fmt.Sprintf(
 			"only %d of %d generated mutants were run (--max-mutants); %d not evaluated",
-			len(run.Mutants), run.Generated, run.Capped)))
+			len(run.Mutants), run.Considered(), run.Capped)))
+	}
+	for _, n := range incrementalNotices(run) {
+		// A diff-only score must not read as a score over the whole chart.
+		fmt.Fprintf(b, "  %s\n", c.warn(n))
 	}
 	b.WriteString("\n")
 }

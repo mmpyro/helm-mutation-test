@@ -226,7 +226,7 @@ func sarifNotifications(run *model.Run) []sarifNotification {
 			run.Score(), t.Killed, t.Scored(),
 			t.NoCoverage, t.Invalid, t.Equivalent, t.Timeout, t.Errored)},
 	}}
-	if run.Threshold > 0 {
+	if run.Threshold > 0 && !run.NothingToScore() {
 		verdict := "meets"
 		if !run.MeetsThreshold() {
 			verdict = "is below"
@@ -236,6 +236,9 @@ func sarifNotifications(run *model.Run) []sarifNotification {
 	}
 	warn := func(text string) {
 		notes = append(notes, sarifNotification{Level: "warning", Message: sarifMessage{Text: text}})
+	}
+	for _, n := range incrementalNotices(run) {
+		warn(n)
 	}
 	if run.Capped > 0 {
 		warn(cappedMessage(run))

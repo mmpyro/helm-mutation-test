@@ -58,6 +58,9 @@ type Config struct {
 	Exclude         []string
 	MaxMutants      int
 	Seed            int64
+	// Since, when set, limits the run to mutants the diff against this git ref
+	// could have affected. Empty means a full run.
+	Since string
 	// EquivalenceCheck re-renders each survivor to find mutations that cannot
 	// change any manifest. They are reported as Equivalent and left out of the
 	// score, which they would otherwise depress by an amount no test can fix.

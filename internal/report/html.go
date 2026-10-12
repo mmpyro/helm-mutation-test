@@ -103,7 +103,15 @@ func summaryTable(run *model.Run) string {
 	}
 	if run.Capped > 0 {
 		fmt.Fprintf(b, `<tr class="warn"><th>Not evaluated</th><td>%d</td><td>--max-mutants ran %d of %d generated</td></tr>`,
-			run.Capped, len(run.Mutants), run.Generated)
+			run.Capped, len(run.Mutants), run.Considered())
+	}
+	if inc := run.Incremental; inc != nil {
+		notices := incrementalNotices(run)
+		fmt.Fprintf(b, `<tr class="warn"><th>Changed files</th><td>%d</td><td>%s</td></tr>`,
+			inc.MutantsSkipped, escapeHTML(notices[0]))
+		for _, n := range notices[1:] {
+			fmt.Fprintf(b, `<tr class="warn"><th>Nothing scored</th><td>-</td><td>%s</td></tr>`, escapeHTML(n))
+		}
 	}
 	return b.String()
 }
