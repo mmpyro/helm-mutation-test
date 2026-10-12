@@ -241,15 +241,18 @@ overwrite each other.
 
 ### Top level (real, from the strong-suite run)
 
+!!! tip "Interactive"
+    On the docs site, click the :material-plus-circle: markers to see what each field means.
+
 ```json
 {
   "schema": "helm-mutation-test/v1",
   "chartName": "sample",
   "chartPath": "testdata/charts/sample",
-  "score": 100,
+  "score": 100, // (1)!
   "threshold": 0,
-  "passed": true,
-  "tally": {
+  "passed": true, // (2)!
+  "tally": { // (3)!
     "killed": 417,
     "survived": 0,
     "noCoverage": 0,
@@ -258,15 +261,15 @@ overwrite each other.
     "timeout": 0,
     "error": 0
   },
-  "equivalenceChecked": true,
-  "equivalenceUnchecked": 0,
-  "generated": 458,
-  "capped": 0,
+  "equivalenceChecked": true, // (4)!
+  "equivalenceUnchecked": 0, // (5)!
+  "generated": 458, // (6)!
+  "capped": 0, // (7)!
   "mutators": [
     "bool-flip", "comparison-swap", "cond-negate", "default-drop",
     "num-literal", "range-empty", "required-drop", "str-literal", "yaml-key-delete"
   ],
-  "suites": [
+  "suites": [ // (8)!
     {
       "name": "strong assertions on the deployment",
       "file": "tests/strong_test.yaml",
@@ -286,6 +289,19 @@ overwrite each other.
   "timing": { "baselineMillis": 41, "totalMillis": 1491 }
 }
 ```
+
+1.  `killed / (killed + survived)` as a percentage, rounded to two places. Nothing else is in the
+    denominator.
+2.  Reflects `--threshold`; with no threshold it is `true`. A shard refuses `--threshold`: only
+    `merge` grades.
+3.  One count per status. Only `killed` and `survived` grade the suite; every other status is
+    excluded from `score` and named here.
+4.  `false` when `--no-equivalence-check` skipped the pass, so `tally.equivalent == 0` is not
+    ambiguous.
+5.  Survivors the pass ran over but could not decide. Each one's `detail` says why.
+6.  The count **before** any `--max-mutants` cap or `--since` narrowing.
+7.  How many mutants `--max-mutants` dropped. Never silent: every format names it.
+8.  One entry per `suite:` document, not per suite file.
 
 *(Suite test lists, `byMutator`, `byFile` and `mutants` truncated above; the real file is complete.
 Note seven suites all live in one suite *file* — `suites` is one entry per `suite:` document. Every

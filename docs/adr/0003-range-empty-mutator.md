@@ -3,8 +3,8 @@
 **Date:** 2026-08-03  
 **Status:** Accepted  
 **Deciders:** Project maintainers  
-**Spec:** [2026-08-03-range-empty-mutator-design.md](../specs/2026-08-03-range-empty-mutator-design.md)  
-**Plan:** [2026-08-03-range-empty-mutator.md](../plans/2026-08-03-range-empty-mutator.md)
+**Spec:** `2026-08-03-range-empty-mutator-design.md` (not in the repository)  
+**Plan:** `2026-08-03-range-empty-mutator.md` (not in the repository)
 
 ---
 

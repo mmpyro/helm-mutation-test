@@ -21,6 +21,9 @@ make demo        # score the fixture chart with both suites
 make install     # install as a real Helm plugin from this directory
 
 make integration-tests  # black-box CLI tests: exit codes, all six report formats
+
+make docs-serve  # docs site (MkDocs Material, docs/ + mkdocs.yml) at http://127.0.0.1:8000/helm-mutation-test/
+make docs-build  # mkdocs build --strict -> site/ (what the Docs workflow deploys to GitHub Pages)
 ```
 
 `make test` does not include the integration suite: `test/integration` is behind a
@@ -31,6 +34,16 @@ than trusting whatever is in `bin/`.
 The `runner` package tests take ~3min under `-race` because they spawn worker
 subprocesses and run real chart renders — the fixture chart yields ~460 mutants
 and several tests score it end to end. That is expected, not a hang.
+
+## Docs site
+
+`.github/workflows/docs.yml` builds the docs site (MkDocs Material, config in `mkdocs.yml`, pinned in
+`docs/requirements.txt`) with `mkdocs build --strict` on PRs that touch `docs/` or `mkdocs.yml`, and on
+`main` deploys it to GitHub Pages (<https://mmpyro.github.io/helm-mutation-test/>). The pages in
+`docs/` must stay readable on github.com: site-only extras (content tabs, code annotations, mermaid
+`click` links) degrade to plain Markdown there. `--strict` fails on any link leaving `docs/`, so link
+to repository files such as this one by their github.com URL. `docs/README.md` is gone on purpose —
+MkDocs drops it in favour of `index.md`; the quickstart lives in `docs/getting-started.md`.
 
 ## Releasing
 

@@ -3,8 +3,8 @@
 **Date:** 2026-08-02  
 **Status:** Accepted  
 **Deciders:** Project maintainers  
-**Spec:** [2026-08-02-equivalent-mutant-detection-design.md](../superpowers/specs/2026-08-02-equivalent-mutant-detection-design.md)  
-**Plan:** [2026-08-02-equivalent-mutant-detection.md](../superpowers/plans/2026-08-02-equivalent-mutant-detection.md)
+**Spec:** `2026-08-02-equivalent-mutant-detection-design.md` (not in the repository)  
+**Plan:** `2026-08-02-equivalent-mutant-detection.md` (not in the repository)
 
 ---
 

@@ -57,6 +57,19 @@ install: build ## Install as a Helm plugin from this directory (safe to re-run)
 		helm plugin install .; \
 	fi
 
+.venv-docs: docs/requirements.txt
+	python3 -m venv .venv-docs
+	.venv-docs/bin/pip install -q -r docs/requirements.txt
+	touch .venv-docs
+
+.PHONY: docs-build
+docs-build: .venv-docs ## Build the docs site with mkdocs --strict into site/
+	.venv-docs/bin/mkdocs build --strict
+
+.PHONY: docs-serve
+docs-serve: .venv-docs ## Serve the docs site with live reload at http://127.0.0.1:8000/helm-mutation-test/
+	.venv-docs/bin/mkdocs serve
+
 .PHONY: clean
 clean:
 	rm -rf bin .helm-mutation-test

@@ -476,7 +476,7 @@ The first case shows why the pipeline is preserved: `| quote` stays.
 The deletion is anchored on the *end of the message argument*, not on the value's own position. A
 `FieldNode` reports a position past its first segment, so anchoring on `.Values.token` would make it
 appear to start at `.token` and the deletion would swallow `.Values`. See
-[the gotchas in `CLAUDE.md`](../CLAUDE.md#gotchas-that-have-already-cost-time).
+[the gotchas in `CLAUDE.md`](https://github.com/mmpyro/helm-mutation-test/blob/main/CLAUDE.md#gotchas-that-have-already-cost-time).
 
 **Why it matters.** `required` is the chart author's contract that a value must be supplied. The only
 way to verify it is a negative test — helm-unittest's `failedTemplate` assertion — and negative tests
