@@ -87,10 +87,17 @@ func JUnit(run *model.Run) ([]byte, error) {
 		suites.Tests++
 		suites.Skipped++
 	}
-
 	// A diff-only run reads as a full one in a CI UI unless it says otherwise.
 	if run.Incremental != nil {
 		suites.Suites = append([]junitSuite{incrementalNotice(run)}, suites.Suites...)
+		suites.Tests++
+		suites.Skipped++
+	}
+
+	// A shard's results are a slice of the run. Prepended last so it is the very
+	// first suite a CI UI shows: it qualifies every other number in the file.
+	if run.IsSlice() {
+		suites.Suites = append([]junitSuite{shardNotice(run)}, suites.Suites...)
 		suites.Tests++
 		suites.Skipped++
 	}
@@ -154,6 +161,24 @@ func cappedNotice(run *model.Run) junitSuite {
 			ClassName: "--max-mutants",
 			Time:      "0.0000",
 			Skipped:   &junitSkipped{Message: cappedMessage(run)},
+		}},
+	}
+}
+
+// shardNotice makes a shard visible in the XML, the same way cappedNotice does
+// for --max-mutants: a CI UI fed one shard's file would otherwise show its
+// passes and failures as the whole chart's.
+func shardNotice(run *model.Run) junitSuite {
+	return junitSuite{
+		Name:     "--shard-index",
+		Tests:    1,
+		Skipped:  1,
+		Hostname: "localhost",
+		Cases: []junitCase{{
+			Name:      fmt.Sprintf("shard %d of %d", run.Shard.Index, run.Shard.Count),
+			ClassName: "--shard-index",
+			Time:      "0.0000",
+			Skipped:   &junitSkipped{Message: sliceNotice(run)},
 		}},
 	}
 }

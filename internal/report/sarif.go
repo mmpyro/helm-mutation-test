@@ -64,6 +64,13 @@ func SARIF(run *model.Run) ([]byte, error) {
 		}},
 	}
 
+	if run.Shard != nil {
+		log.Runs[0].Properties["shard"] = run.Shard
+	}
+	if run.Incremental != nil {
+		log.Runs[0].Properties["incremental"] = run.Incremental
+	}
+
 	seen := map[string]int{}
 	uncovered := map[string]int{}
 	var uncoveredFiles []string
@@ -221,9 +228,9 @@ func sarifNotifications(run *model.Run) []sarifNotification {
 	notes := []sarifNotification{{
 		Level: "note",
 		Message: sarifMessage{Text: fmt.Sprintf(
-			"mutation score %.1f%% (%d killed of %d scored); excluded from the score: "+
+			"%s %.1f%% (%d killed of %d scored); excluded from the score: "+
 				"%d no-coverage, %d invalid, %d equivalent, %d timeout, %d error",
-			run.Score(), t.Killed, t.Scored(),
+			scoreLabel(run), run.Score(), t.Killed, t.Scored(),
 			t.NoCoverage, t.Invalid, t.Equivalent, t.Timeout, t.Errored)},
 	}}
 	if run.Threshold > 0 && !run.NothingToScore() {
@@ -236,6 +243,9 @@ func sarifNotifications(run *model.Run) []sarifNotification {
 	}
 	warn := func(text string) {
 		notes = append(notes, sarifNotification{Level: "warning", Message: sarifMessage{Text: text}})
+	}
+	if run.IsSlice() {
+		warn(sliceNotice(run))
 	}
 	for _, n := range incrementalNotices(run) {
 		warn(n)

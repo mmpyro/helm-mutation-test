@@ -94,6 +94,10 @@ helm mutation-test ./my-chart --since origin/main --threshold 70
 
 # A fast subset while iterating on tests
 helm mutation-test ./my-chart --mutators cond-negate,str-literal --max-mutants 50
+
+# Split a big chart across CI jobs, then grade the merged result
+helm mutation-test ./my-chart --shard-index 2 --shard-count 4 --report json --report-dir shards
+helm mutation-test merge shards/mutation-report.shard-*.json --threshold 70
 ```
 
 ### Reading the output
@@ -168,7 +172,9 @@ folding it in would flatter the number:
 `--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
 coverage. `--since` does the same for the mutants outside the diff, and falls back to a full run —
 saying why — when a change such as `values.yaml` or a partial cannot be attributed to particular
-templates. `--no-equivalence-check` disables the equivalence pass; every format states when that
+templates. For the same reason a `--shard-count` shard labels its score a slice in every format, refuses
+`--threshold`, and only the `merge` of every shard is graded. `--no-equivalence-check` disables the
+equivalence pass; every format states when that
 happened, the same way it states a truncation.
 
 ## Reports

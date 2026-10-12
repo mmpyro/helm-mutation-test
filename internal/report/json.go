@@ -3,6 +3,7 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/mmpyro/helm-mutation-test/internal/model"
 )
@@ -12,7 +13,7 @@ import (
 // parse if you want to build something on top.
 func JSON(run *model.Run) ([]byte, error) {
 	b, err := json.MarshalIndent(jsonReport{
-		Schema:               "helm-mutation-test/v1",
+		Schema:               jsonSchema,
 		ChartName:            run.ChartName,
 		ChartPath:            run.ChartPath,
 		Score:                round(run.Score(), 2),
@@ -23,6 +24,7 @@ func JSON(run *model.Run) ([]byte, error) {
 		EquivalenceUnchecked: run.EquivalenceUnchecked,
 		Generated:            run.Generated,
 		Capped:               run.Capped,
+		Shard:                run.Shard,
 		Mutators:             run.Mutators,
 		Suites:               run.Suites,
 		TestCount:            run.TestCount,
@@ -59,20 +61,62 @@ type jsonReport struct {
 	// EquivalenceUnchecked counts survivors the pass ran over but could not
 	// decide, so a consumer can tell a verified run from one where the check
 	// reached nothing.
-	EquivalenceUnchecked int                 `json:"equivalenceUnchecked"`
-	Generated            int                 `json:"generated"`
-	Capped               int                 `json:"capped"`
-	Mutators             []string            `json:"mutators"`
-	Suites               []model.SuiteInfo   `json:"suites"`
-	TestCount            int                 `json:"testCount"`
-	ByMutator            []breakdown         `json:"byMutator"`
-	ByFile               []breakdown         `json:"byFile"`
-	Mutants              []model.Mutant      `json:"mutants"`
-	Skipped              []model.SkippedFile `json:"skippedFiles,omitempty"`
+	EquivalenceUnchecked int `json:"equivalenceUnchecked"`
+	Generated            int `json:"generated"`
+	Capped               int `json:"capped"`
+	// Shard is present only on one slice of a split run. Its score covers that
+	// slice alone; a consumer must merge every shard before grading.
+	Shard     *model.Shard        `json:"shard,omitempty"`
+	Mutators  []string            `json:"mutators"`
+	Suites    []model.SuiteInfo   `json:"suites"`
+	TestCount int                 `json:"testCount"`
+	ByMutator []breakdown         `json:"byMutator"`
+	ByFile    []breakdown         `json:"byFile"`
+	Mutants   []model.Mutant      `json:"mutants"`
+	Skipped   []model.SkippedFile `json:"skippedFiles,omitempty"`
 	// Incremental is present only for a --since run; its absence means the
 	// score covers every generated mutant (less any --max-mutants cap).
 	Incremental *model.Incremental `json:"incremental,omitempty"`
 	Timing      timing             `json:"timing"`
+}
+
+// jsonSchema identifies the wire shape. ReadJSON refuses anything else rather
+// than guess at a future layout.
+const jsonSchema = "helm-mutation-test/v1"
+
+// ReadJSON is the inverse of JSON: it reconstructs the run from a JSON report,
+// so shard reports can be merged. Derived fields (score, passed, breakdowns) are
+// ignored and recomputed from the mutants; run durations come back at the
+// millisecond resolution the report stores.
+func ReadJSON(data []byte) (*model.Run, error) {
+	var r jsonReport
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("decoding JSON report: %w", err)
+	}
+	if r.Schema != jsonSchema {
+		return nil, fmt.Errorf("unsupported report schema %q (want %q); is this a --report json file?",
+			r.Schema, jsonSchema)
+	}
+	run := &model.Run{
+		ChartName:            r.ChartName,
+		ChartPath:            r.ChartPath,
+		Mutators:             r.Mutators,
+		Suites:               r.Suites,
+		TestCount:            r.TestCount,
+		Mutants:              r.Mutants,
+		Generated:            r.Generated,
+		Capped:               r.Capped,
+		Shard:                r.Shard,
+		EquivalenceChecked:   r.EquivalenceChecked,
+		EquivalenceUnchecked: r.EquivalenceUnchecked,
+		SkippedFiles:         r.Skipped,
+		Incremental:          r.Incremental,
+		BaselineDuration:     time.Duration(r.Timing.BaselineMillis) * time.Millisecond,
+		Duration:             time.Duration(r.Timing.TotalMillis) * time.Millisecond,
+		Threshold:            r.Threshold,
+	}
+	run.ComputeTally()
+	return run, nil
 }
 
 type breakdown struct {

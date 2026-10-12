@@ -29,6 +29,7 @@ func HTML(run *model.Run, chartDir string) ([]byte, error) {
 	replacements := map[string]string{
 		"{{CHART}}":     escapeHTML(run.ChartName),
 		"{{SCORE}}":     fmt.Sprintf("%.1f", run.Score()),
+		"{{LABEL}}":     escapeHTML(scoreLabel(run)),
 		"{{BAND}}":      scoreBand(run.Score()),
 		"{{SUMMARY}}":   summaryTable(run),
 		"{{SURVIVORS}}": survivorList(run),
@@ -101,9 +102,13 @@ func summaryTable(run *model.Run) string {
 			`<td>survivors the equivalence check could not reach a verdict on; `+
 			`each one's reason is in its detail</td></tr>`, run.EquivalenceUnchecked)
 	}
+	if run.IsSlice() {
+		fmt.Fprintf(b, `<tr class="warn"><th>Shard</th><td>%d/%d</td><td>%s</td></tr>`,
+			run.Shard.Index, run.Shard.Count, escapeHTML(sliceNotice(run)))
+	}
 	if run.Capped > 0 {
 		fmt.Fprintf(b, `<tr class="warn"><th>Not evaluated</th><td>%d</td><td>--max-mutants ran %d of %d generated</td></tr>`,
-			run.Capped, len(run.Mutants), run.Considered())
+			run.Capped, selectedCount(run), run.Considered())
 	}
 	if inc := run.Incremental; inc != nil {
 		notices := incrementalNotices(run)

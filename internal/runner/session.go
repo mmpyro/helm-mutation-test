@@ -92,11 +92,23 @@ func (s *Session) Run(ctx context.Context) (*model.Run, error) {
 		}
 	}
 
-	plans, dropped := mutator.Cap(plans, s.Cfg.MaxMutants, s.Cfg.Seed)
+	considered := len(plans)
+	plans, dropped, otherShards := mutator.CapAndShard(plans, s.Cfg.MaxMutants,
+		s.Cfg.ShardIndex, s.Cfg.ShardCount, s.Cfg.Seed)
 	run.Capped = dropped
 	if dropped > 0 {
 		s.phase(fmt.Sprintf("--max-mutants=%d kept %d of %d mutants (%d dropped)",
-			s.Cfg.MaxMutants, len(plans), len(plans)+dropped, dropped))
+			s.Cfg.MaxMutants, considered-dropped, considered, dropped))
+	}
+	if s.Cfg.Sharded() {
+		run.Shard = &model.Shard{
+			Index:       s.Cfg.ShardIndex,
+			Count:       s.Cfg.ShardCount,
+			OtherShards: otherShards,
+			Seed:        s.Cfg.Seed,
+		}
+		s.phase(fmt.Sprintf("shard %d/%d: evaluating %d of %d mutants",
+			s.Cfg.ShardIndex, s.Cfg.ShardCount, len(plans), len(plans)+otherShards))
 	}
 	if len(plans) == 0 {
 		run.Duration = time.Since(start)
