@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestEveryFormatReportsTheSameScore: the five formats are pure functions of one
+// TestEveryFormatReportsTheSameScore: the six formats are pure functions of one
 // run, so a disagreement between them means one of them is lying. JUnit carries
 // no score, so it is held to the tallies instead.
 func TestEveryFormatReportsTheSameScore(t *testing.T) {
@@ -31,6 +31,16 @@ func TestEveryFormatReportsTheSameScore(t *testing.T) {
 	x := r.JUnit(t)
 	if x.Failures != j.Tally.Survived {
 		t.Errorf("junit failures = %d but json says %d survived", x.Failures, j.Tally.Survived)
+	}
+	// SARIF carries one result per survivor plus one per uncovered file, and the
+	// score itself in its summary notification.
+	sa := r.SARIF(t)
+	if got, want := len(sa.Runs[0].Results), j.Tally.Survived+j.uncoveredFiles(); got != want {
+		t.Errorf("sarif has %d results, want %d survivors + %d uncovered files",
+			got, j.Tally.Survived, j.uncoveredFiles())
+	}
+	if !strings.Contains(sa.notices(), score) {
+		t.Errorf("sarif does not report the score %s", score)
 	}
 	if got := r.Stryker(t).byStatus(); got["Survived"] != j.Tally.Survived ||
 		got["Killed"] != j.Tally.Killed {
@@ -97,6 +107,18 @@ func TestEveryFormatNamesWhatItExcluded(t *testing.T) {
 	if got := r.JUnit(t).Skipped; got != want {
 		t.Errorf("junit skipped = %d, want %d", got, want)
 	}
+
+	// SARIF's results omit every excluded mutant, so its notifications must name them.
+	n := r.SARIF(t).notices()
+	for _, want := range []string{
+		fmt.Sprintf("%d no-coverage", j.Tally.NoCoverage),
+		fmt.Sprintf("%d invalid", j.Tally.Invalid),
+		"excluded from the score",
+	} {
+		if !strings.Contains(n, want) {
+			t.Errorf("sarif notifications do not name %q:\n%s", want, n)
+		}
+	}
 }
 
 // TestEveryFormatDisclosesTruncation: a --max-mutants run is a sample. Every
@@ -133,6 +155,11 @@ func TestEveryFormatDisclosesTruncation(t *testing.T) {
 	if !strings.Contains(r.HTML(t), fmt.Sprintf(
 		"--max-mutants ran %d of %d generated", limit, j.Generated)) {
 		t.Error("HTML does not disclose the cap")
+	}
+
+	if !strings.Contains(r.SARIF(t).notices(), fmt.Sprintf(
+		"%d of %d generated mutants were not evaluated (--max-mutants)", dropped, j.Generated)) {
+		t.Error("SARIF does not disclose the cap")
 	}
 
 	// JUnit says it with a dedicated testsuite, added in this branch.

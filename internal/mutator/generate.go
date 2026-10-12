@@ -117,8 +117,26 @@ func mutantID(file string, c Candidate) string {
 // The drop count is returned rather than swallowed: a silently truncated run
 // reads as full coverage, which would overstate what was actually measured.
 func Cap(plans []Plan, n int, seed int64) (kept []Plan, dropped int) {
-	if n <= 0 || len(plans) <= n {
-		return plans, 0
+	kept, dropped, _ = CapAndShard(plans, n, 0, 0, seed)
+	return kept, dropped
+}
+
+// CapAndShard applies the --max-mutants cap and then takes shard shardIndex (1-based)
+// of shardCount. A shardCount of 0 or 1 means unsharded, and CapAndShard is then
+// exactly Cap.
+//
+// Both steps share one seeded shuffle: the cap keeps the first n of it, so a
+// sharded run evaluates the same subset an unsharded one would, and each shard
+// takes every shardCount-th entry of that, so shards are disjoint, together
+// cover the capped set exactly, and each one samples the whole chart rather than
+// a contiguous run of files.
+//
+// Both drop counts are returned rather than swallowed: capped is what no shard
+// evaluates, otherShards what a different shard evaluates.
+func CapAndShard(plans []Plan, n, shardIndex, shardCount int, seed int64) (kept []Plan, capped, otherShards int) {
+	sharded := shardCount > 1
+	if !sharded && (n <= 0 || len(plans) <= n) {
+		return plans, 0, 0
 	}
 	// Sample by shuffling indices so the subset spans the whole chart rather than
 	// stopping at the first n mutants of the first file.
@@ -129,11 +147,24 @@ func Cap(plans []Plan, n int, seed int64) (kept []Plan, dropped int) {
 	rng := rand.New(rand.NewSource(seed))
 	rng.Shuffle(len(idx), func(i, j int) { idx[i], idx[j] = idx[j], idx[i] })
 
-	chosen := idx[:n]
+	pool := idx
+	if n > 0 && len(plans) > n {
+		pool = idx[:n]
+		capped = len(plans) - n
+	}
+	chosen := pool
+	if sharded {
+		chosen = make([]int, 0, len(pool)/shardCount+1)
+		for i := shardIndex - 1; i < len(pool); i += shardCount {
+			chosen = append(chosen, pool[i])
+		}
+		otherShards = len(pool) - len(chosen)
+	}
+
 	sort.Ints(chosen) // restore report order
-	kept = make([]Plan, 0, n)
+	kept = make([]Plan, 0, len(chosen))
 	for _, i := range chosen {
 		kept = append(kept, plans[i])
 	}
-	return kept, len(plans) - n
+	return kept, capped, otherShards
 }

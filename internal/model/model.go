@@ -171,6 +171,10 @@ type Run struct {
 	// Capped is how many mutants the cap discarded. Reported explicitly: a silent
 	// truncation would read as full coverage.
 	Capped int `json:"capped"`
+	// Shard is set when this run evaluated one slice of a split run. Its score
+	// covers that slice only; it is not the chart's mutation score until every
+	// shard is merged. Nil for an unsharded or merged run.
+	Shard *Shard `json:"shard,omitempty"`
 	// EquivalenceChecked records whether the equivalence pass ran. Without it,
 	// "equivalent 0" is ambiguous between "checked and found none" and "never
 	// looked", and the second reads as the first.
@@ -182,19 +186,76 @@ type Run struct {
 	EquivalenceUnchecked int `json:"equivalenceUnchecked"`
 	// SkippedFiles records files excluded from AST mutation (e.g. parse failures).
 	SkippedFiles []SkippedFile `json:"skippedFiles,omitempty"`
+	// Incremental is set for a --since run, nil otherwise. It records what the
+	// diff left out, so a score over the diff is never read as a score over the chart.
+	Incremental *Incremental `json:"incremental,omitempty"`
 
 	BaselineDuration time.Duration `json:"baselineDurationNanos"`
 	Duration         time.Duration `json:"durationNanos"`
 	Threshold        float64       `json:"threshold"`
 }
 
+// Shard identifies one slice of a run split with --shard-index/--shard-count.
+type Shard struct {
+	// Index is 1-based.
+	Index int `json:"index"`
+	Count int `json:"count"`
+	// OtherShards is how many selected mutants other shards evaluate. Reported
+	// explicitly for the same reason as Capped.
+	OtherShards int `json:"otherShards"`
+	// Seed is the shuffle seed. Shards only partition the same mutant set when
+	// they share it, so merge refuses a mix.
+	Seed int64 `json:"seed"`
+}
+
+// IsSlice reports whether this run is one shard of a split run, whose score is
+// not a mutation score.
+func (r *Run) IsSlice() bool { return r.Shard != nil }
+
+// Incremental describes how a --since run narrowed the mutant set.
+type Incremental struct {
+	// Base is the ref the user named; BaseCommit is its merge-base with HEAD.
+	Base       string `json:"base"`
+	BaseCommit string `json:"baseCommit"`
+	// FilesChanged are the chart-relative paths that differ from BaseCommit.
+	FilesChanged []string `json:"filesChanged"`
+	// FilesInspected is how many mutable files had their mutants evaluated;
+	// FilesSkipped how many were left out as untouched by the diff.
+	FilesInspected int `json:"filesInspected"`
+	FilesSkipped   int `json:"filesSkipped"`
+	// MutantsSkipped is how many generated mutants the diff left out.
+	MutantsSkipped int `json:"mutantsSkipped"`
+	// FullRunReason is set when a change could not be attributed to particular
+	// files and every mutant ran instead.
+	FullRunReason string `json:"fullRunReason,omitempty"`
+}
+
 // Score is the run's mutation score in [0,100].
 func (r *Run) Score() float64 { return r.Tally.Score() }
 
+// Considered is how many generated mutants were eligible to run: all of them,
+// less any an incremental run left out as outside the diff. --max-mutants
+// samples from this set, so its notices are phrased against it.
+func (r *Run) Considered() int {
+	if r.Incremental == nil {
+		return r.Generated
+	}
+	return r.Generated - r.Incremental.MutantsSkipped
+}
+
+// NothingToScore reports an incremental run whose diff produced no scored
+// mutant. Its 0% is "nothing to grade", not "nothing caught".
+func (r *Run) NothingToScore() bool {
+	return r.Incremental != nil && r.Tally.Scored() == 0
+}
+
 // MeetsThreshold reports whether the score satisfies the configured threshold.
-// A threshold of 0 disables the check.
+// A threshold of 0 disables the check, and so does an incremental run with
+// nothing to score: failing a PR that touched no mutable chart file would make
+// every unrelated change pay for a check that graded nothing. A full run with
+// nothing scored still fails — there, an empty result is itself the problem.
 func (r *Run) MeetsThreshold() bool {
-	return r.Threshold <= 0 || r.Score() >= r.Threshold
+	return r.Threshold <= 0 || r.NothingToScore() || r.Score() >= r.Threshold
 }
 
 // ComputeTally recomputes the aggregate tally from the mutant list.

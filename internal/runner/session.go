@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/mmpyro/helm-mutation-test/internal/config"
 	"github.com/mmpyro/helm-mutation-test/internal/coverage"
+	"github.com/mmpyro/helm-mutation-test/internal/incremental"
 	"github.com/mmpyro/helm-mutation-test/internal/model"
 	"github.com/mmpyro/helm-mutation-test/internal/mutator"
 	"github.com/mmpyro/helm-mutation-test/internal/source"
@@ -37,6 +39,18 @@ func (s *Session) Run(ctx context.Context) (*model.Run, error) {
 		ChartTestsPath: s.Cfg.ChartTestsPath,
 	}
 
+	// Resolve the diff before the baseline: a bad ref should fail in
+	// milliseconds, not after the suite has run.
+	var change *incremental.Change
+	if s.Cfg.Since != "" {
+		s.phase("Listing files changed since " + s.Cfg.Since)
+		c, err := incremental.ChangedFiles(s.Cfg.ChartPath, s.Cfg.Since)
+		if err != nil {
+			return nil, err
+		}
+		change = &c
+	}
+
 	s.phase("Running the chart's tests unmutated")
 	baseline, err := RunBaseline(s.Cfg.ChartPath, opts)
 	if err != nil {
@@ -64,11 +78,37 @@ func (s *Session) Run(ctx context.Context) (*model.Run, error) {
 	}
 	run.Generated = len(gen.Plans)
 
-	plans, dropped := mutator.Cap(gen.Plans, s.Cfg.MaxMutants, s.Cfg.Seed)
+	refs, byID := CoverageRefs(baseline.Suites)
+	index := coverage.Build(refs)
+
+	plans := gen.Plans
+	if change != nil {
+		plans, run.Incremental = narrowToChange(plans, files, *change, s.Cfg.Since, baseline.Suites, index, byID)
+		if inc := run.Incremental; inc.FullRunReason != "" {
+			s.phase("--since " + s.Cfg.Since + ": full run, " + inc.FullRunReason)
+		} else {
+			s.phase(fmt.Sprintf("changed-files mode: %d files inspected, %d untouched files skipped, %d mutants skipped",
+				inc.FilesInspected, inc.FilesSkipped, inc.MutantsSkipped))
+		}
+	}
+
+	considered := len(plans)
+	plans, dropped, otherShards := mutator.CapAndShard(plans, s.Cfg.MaxMutants,
+		s.Cfg.ShardIndex, s.Cfg.ShardCount, s.Cfg.Seed)
 	run.Capped = dropped
 	if dropped > 0 {
 		s.phase(fmt.Sprintf("--max-mutants=%d kept %d of %d mutants (%d dropped)",
-			s.Cfg.MaxMutants, len(plans), run.Generated, dropped))
+			s.Cfg.MaxMutants, considered-dropped, considered, dropped))
+	}
+	if s.Cfg.Sharded() {
+		run.Shard = &model.Shard{
+			Index:       s.Cfg.ShardIndex,
+			Count:       s.Cfg.ShardCount,
+			OtherShards: otherShards,
+			Seed:        s.Cfg.Seed,
+		}
+		s.phase(fmt.Sprintf("shard %d/%d: evaluating %d of %d mutants",
+			s.Cfg.ShardIndex, s.Cfg.ShardCount, len(plans), len(plans)+otherShards))
 	}
 	if len(plans) == 0 {
 		run.Duration = time.Since(start)
@@ -81,10 +121,8 @@ func (s *Session) Run(ctx context.Context) (*model.Run, error) {
 		byPath[f.Path] = f
 	}
 
-	refs, byID := CoverageRefs(baseline.Suites)
-
 	s.phase(fmt.Sprintf("Evaluating %d mutants across %d workers", len(plans), s.Cfg.Parallel))
-	mutants, err := Execute(ctx, plans, coverage.Build(refs), ExecutorConfig{
+	mutants, err := Execute(ctx, plans, index, ExecutorConfig{
 		ChartDir:    s.Cfg.ChartPath,
 		Options:     opts,
 		Files:       byPath,
@@ -121,6 +159,57 @@ func (s *Session) Run(ctx context.Context) (*model.Run, error) {
 	run.ComputeTally()
 	run.Duration = time.Since(start)
 	return run, nil
+}
+
+// narrowToChange keeps the plans whose verdict the change could have moved and
+// records what it left out. A file is kept when it changed itself, or when a
+// changed suite covers it — a stronger or weaker suite regrades every mutant it
+// renders, including values.yaml and partials, which every suite covers.
+func narrowToChange(
+	plans []mutator.Plan, files []*source.File, change incremental.Change, base string,
+	suites []*Suite, index *coverage.Index, byID map[string]SuiteKey,
+) ([]mutator.Plan, *model.Incremental) {
+	inc := &model.Incremental{
+		Base:         base,
+		BaseCommit:   change.BaseCommit,
+		FilesChanged: change.Files,
+	}
+
+	suiteFiles := make([]string, 0, len(suites))
+	for _, s := range suites {
+		suiteFiles = append(suiteFiles, s.Key.File)
+	}
+	sel := incremental.Classify(change.Files, suiteFiles)
+	if sel.Full {
+		inc.FullRunReason = sel.Reason
+		inc.FilesInspected = len(files)
+		return plans, inc
+	}
+
+	keep := map[string]bool{}
+	for _, f := range files {
+		if slices.Contains(sel.Templates, f.Path) {
+			keep[f.Path] = true
+			continue
+		}
+		for _, id := range index.For(f.Path) {
+			if slices.Contains(sel.Suites, byID[id].File) {
+				keep[f.Path] = true
+				break
+			}
+		}
+	}
+	inc.FilesInspected = len(keep)
+	inc.FilesSkipped = len(files) - len(keep)
+
+	kept := make([]mutator.Plan, 0, len(plans))
+	for _, p := range plans {
+		if keep[p.File] {
+			kept = append(kept, p)
+		}
+	}
+	inc.MutantsSkipped = len(plans) - len(kept)
+	return kept, inc
 }
 
 func (s *Session) phase(msg string) {

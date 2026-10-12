@@ -20,12 +20,12 @@ make lint        # go vet + gofmt check
 make demo        # score the fixture chart with both suites
 make install     # install as a real Helm plugin from this directory
 
-make integration-tests  # black-box CLI tests: exit codes, all five report formats
+make integration-tests  # black-box CLI tests: exit codes, all six report formats
 ```
 
 `make test` does not include the integration suite: `test/integration` is behind a
 `//go:build integration` tag so the inner loop stays fast. Run it with
-`make integration-tests` (~11s), which builds its own binary from source rather
+`make integration-tests` (~20s), which builds its own binary from source rather
 than trusting whatever is in `bin/`.
 
 The `runner` package tests take ~3min under `-race` because they spawn worker
@@ -60,10 +60,11 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | `internal/source` | Load chart files; locate mutations via parser, apply as byte edits |
 | `internal/mutator` | The 9 mutators + registry + deterministic plan generation |
 | `internal/coverage` | Map a chart file to the suites that render it. Dependency-free by design |
+| `internal/incremental` | `--since`: list changed files via git, classify them into a selection. Dependency-free |
 | `internal/workspace` | Per-worker chart copies; write/restore a mutation |
 | `internal/runner` | helm-unittest seam, baseline gate, executor, classification, session |
 | `internal/equivalence` | Decide whether a mutation can change any rendered manifest. Imports Helm, never `runner`. |
-| `internal/report` | Five output formats, each a pure function of `model.Run` |
+| `internal/report` | Six output formats, each a pure function of `model.Run` |
 | `internal/model` | `Run`, `Mutant`, `Status`, `Tally` — the canonical model |
 | `test/integration` | Black-box tests of the built binary: exit codes, flags, every report format |
 
@@ -82,7 +83,17 @@ Two boundaries are load-bearing and should stay intact:
 Everything else — no-coverage, invalid, timeout, error, and anything dropped by
 `--max-mutants` — is excluded from the score *and named explicitly in every report
 format*. A silently truncated or filtered run would read as full coverage. If you
-add a status or a cap, surface it in all five formats.
+add a status or a cap, surface it in all six formats.
+
+**A shard is a slice, not a score.** `--shard-index/--shard-count` reuse
+`--max-mutants`' seeded shuffle (`mutator.CapAndShard`: cap first, then every M-th
+entry), so shards partition exactly the unsharded selection. A shard's report sets
+`Run.Shard`, every format labels its score a slice (`report/shard.go`), and config
+refuses `--threshold` with `--shard-count > 1`. Grading happens on `merge`, whose
+input is the JSON report (`report.ReadJSON`) and which refuses any incomplete or
+inconsistent set: `model.Merge` checks that the mutants add up to
+`Generated − Capped` rather than trusting shard metadata. A new `Run` field merge
+depends on must round-trip through `ReadJSON` — `TestReadJSONRoundTrips` pins it.
 
 **`Equivalent` is the fourth excluded status**, alongside no-coverage, invalid and
 the mutation-control caps: a mutation that provably cannot change any rendered
@@ -114,6 +125,15 @@ helm unittest -f 'tests/strong_test.yaml' /tmp/probe   # should be killed
 If it survives one and is killed by the other, it is a useful mutant — do not guard
 it. The only justified guard is `include`/`template` target strings, which genuinely
 error. Watch the invalid rate: `TestInvalidMutantRateIsLow` fails above 20%.
+
+**`--since` narrows only what it can attribute.** `internal/incremental.Classify` keeps a changed
+non-partial template's own mutants and every file a changed suite covers; *any* other changed chart
+path forces a full run, with the path named in `Run.Incremental.FullRunReason`. An unrecognised file
+might be read through `.Files.Get`, so ignoring it would skip mutants whose verdict may have moved.
+Like `--max-mutants`, the skipped count is named in all six formats via
+`report.incrementalNotices`. `internal/incremental` imports nothing from this module, like
+`coverage`. A `--since` run that scores nothing passes `--threshold` (`Run.NothingToScore`); a full
+run that scores nothing still fails.
 
 **Baseline failure is a hard stop, not a warning.** A score over a red suite is a
 fiction. Exit code 2.
@@ -260,5 +280,5 @@ error messages, `docs/reports.md`'s JSON sample, and
 
 ## Out of scope for now
 
-Incremental / changed-files-only mode, SARIF output, mutant caching across runs,
+Mutant caching across runs,
 higher-order mutants, subchart-aware scoring.

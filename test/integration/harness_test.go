@@ -31,8 +31,9 @@ import (
 // is the working directory every invocation gets.
 const fixture = "testdata/charts/sample"
 
-// allFormats requests every format, which writes all five files.
-const allFormats = "console,json,markdown,junit,html"
+// allFormats requests every format, which writes all six report files (html also
+// writes its stryker JSON alongside).
+const allFormats = "console,json,markdown,junit,html,sarif"
 
 var (
 	// bin is the freshly built plugin.
@@ -222,9 +223,16 @@ func (r result) file(t *testing.T, name string) []byte {
 
 func (r result) JSON(t *testing.T) jsonReport {
 	t.Helper()
+	return r.jsonFile(t, "mutation-report.json")
+}
+
+// jsonFile reads a JSON report by name, for a shard's, which carries its
+// position in the file name.
+func (r result) jsonFile(t *testing.T, name string) jsonReport {
+	t.Helper()
 	var out jsonReport
-	if err := json.Unmarshal(r.file(t, "mutation-report.json"), &out); err != nil {
-		t.Fatalf("mutation-report.json is not valid JSON: %v", err)
+	if err := json.Unmarshal(r.file(t, name), &out); err != nil {
+		t.Fatalf("%s is not valid JSON: %v", name, err)
 	}
 	return out
 }
@@ -247,6 +255,18 @@ func (r result) Stryker(t *testing.T) strykerReport {
 	return out
 }
 
+func (r result) SARIF(t *testing.T) sarifReport {
+	t.Helper()
+	var out sarifReport
+	if err := json.Unmarshal(r.file(t, "mutation-report.sarif"), &out); err != nil {
+		t.Fatalf("mutation-report.sarif is not valid JSON: %v", err)
+	}
+	if len(out.Runs) != 1 {
+		t.Fatalf("mutation-report.sarif has %d runs, want 1", len(out.Runs))
+	}
+	return out
+}
+
 func (r result) Markdown(t *testing.T) string { return string(r.file(t, "mutation-report.md")) }
 func (r result) HTML(t *testing.T) string     { return string(r.file(t, "mutation-report.html")) }
 
@@ -265,20 +285,89 @@ type jsonReport struct {
 	Passed    bool    `json:"passed"`
 	Tally     tally   `json:"tally"`
 	// EquivalenceChecked and EquivalenceUnchecked drive junitNotices below.
-	EquivalenceChecked   bool        `json:"equivalenceChecked"`
-	EquivalenceUnchecked int         `json:"equivalenceUnchecked"`
-	Generated            int         `json:"generated"`
-	Capped               int         `json:"capped"`
-	Mutators             []string    `json:"mutators"`
-	Suites               []suiteInfo `json:"suites"`
-	TestCount            int         `json:"testCount"`
-	ByMutator            []breakdown `json:"byMutator"`
-	ByFile               []breakdown `json:"byFile"`
-	Mutants              []mutant    `json:"mutants"`
-	Timing               struct {
+	EquivalenceChecked   bool `json:"equivalenceChecked"`
+	EquivalenceUnchecked int  `json:"equivalenceUnchecked"`
+	Generated            int  `json:"generated"`
+	Capped               int  `json:"capped"`
+	Shard                *struct {
+		Index       int   `json:"index"`
+		Count       int   `json:"count"`
+		OtherShards int   `json:"otherShards"`
+		Seed        int64 `json:"seed"`
+	} `json:"shard"`
+	Mutators    []string    `json:"mutators"`
+	Suites      []suiteInfo `json:"suites"`
+	TestCount   int         `json:"testCount"`
+	ByMutator   []breakdown `json:"byMutator"`
+	ByFile      []breakdown `json:"byFile"`
+	Mutants     []mutant    `json:"mutants"`
+	Incremental *struct {
+		Base           string   `json:"base"`
+		BaseCommit     string   `json:"baseCommit"`
+		FilesChanged   []string `json:"filesChanged"`
+		FilesInspected int      `json:"filesInspected"`
+		FilesSkipped   int      `json:"filesSkipped"`
+		MutantsSkipped int      `json:"mutantsSkipped"`
+		FullRunReason  string   `json:"fullRunReason"`
+	} `json:"incremental"`
+	Timing struct {
 		BaselineMillis int64 `json:"baselineMillis"`
 		TotalMillis    int64 `json:"totalMillis"`
 	} `json:"timing"`
+}
+
+type sarifReport struct {
+	Version string `json:"version"`
+	Runs    []struct {
+		Invocations []struct {
+			Notifications []struct {
+				Level   string `json:"level"`
+				Message struct {
+					Text string `json:"text"`
+				} `json:"message"`
+			} `json:"toolExecutionNotifications"`
+		} `json:"invocations"`
+		Results []struct {
+			RuleID    string `json:"ruleId"`
+			Level     string `json:"level"`
+			Locations []struct {
+				PhysicalLocation struct {
+					ArtifactLocation struct {
+						URI string `json:"uri"`
+					} `json:"artifactLocation"`
+					Region struct {
+						StartLine int `json:"startLine"`
+					} `json:"region"`
+				} `json:"physicalLocation"`
+			} `json:"locations"`
+			Properties struct {
+				MutantID string `json:"mutantId"`
+			} `json:"properties"`
+		} `json:"results"`
+	} `json:"runs"`
+}
+
+// notices joins every notification so a test can search what SARIF disclosed.
+func (s sarifReport) notices() string {
+	var b strings.Builder
+	for _, inv := range s.Runs[0].Invocations {
+		for _, n := range inv.Notifications {
+			b.WriteString(n.Message.Text + "\n")
+		}
+	}
+	return b.String()
+}
+
+// uncoveredFiles is how many SARIF no-coverage results a run should carry: one
+// per file, not one per mutant.
+func (j jsonReport) uncoveredFiles() int {
+	files := map[string]bool{}
+	for _, m := range j.Mutants {
+		if m.Status == "NoCoverage" {
+			files[m.File] = true
+		}
+	}
+	return len(files)
 }
 
 type tally struct {
@@ -384,6 +473,9 @@ func (j jsonReport) junitNotices() int {
 		n++
 	}
 	if j.EquivalenceUnchecked > 0 {
+		n++
+	}
+	if j.Incremental != nil {
 		n++
 	}
 	return n
@@ -523,6 +615,7 @@ func TestTheFixtureChartScoresAndWritesEveryFormat(t *testing.T) {
 		"mutation-report.junit.xml",
 		"mutation-report.html",
 		"mutation-report.stryker.json",
+		"mutation-report.sarif",
 	} {
 		if _, err := os.Stat(filepath.Join(r.Dir, name)); err != nil {
 			t.Errorf("%s was not written: %v", name, err)

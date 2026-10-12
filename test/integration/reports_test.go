@@ -4,6 +4,8 @@ package integration
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -359,6 +361,7 @@ func TestEveryWrittenReportIsAnnounced(t *testing.T) {
 		"mutation-report.junit.xml",
 		"mutation-report.html",
 		"mutation-report.stryker.json",
+		"mutation-report.sarif",
 	} {
 		if !strings.Contains(r.Stdout, name) {
 			t.Errorf("stdout does not announce %s", name)
@@ -380,5 +383,44 @@ func TestOnlyRequestedFormatsAreWritten(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0] != "mutation-report.json" {
 		t.Errorf("report dir holds %v, want only mutation-report.json", entries)
+	}
+}
+
+// TestSARIFLocationsPointAtRealLines: an annotation on the wrong line is worse
+// than none, because it sends the reader to code the mutation never touched. The
+// fixture is run by a relative path from the repo root, so every URI must resolve
+// from there to the line the mutation changed.
+func TestSARIFLocationsPointAtRealLines(t *testing.T) {
+	r := weak(t)
+	byID := map[string]mutant{}
+	for _, m := range r.JSON(t).Mutants {
+		byID[m.ID] = m
+	}
+
+	checked := 0
+	for _, res := range r.SARIF(t).Runs[0].Results {
+		if res.RuleID == "no-coverage" {
+			continue
+		}
+		m, ok := byID[res.Properties.MutantID]
+		if !ok {
+			t.Errorf("SARIF result names mutant %q, which the JSON report lacks", res.Properties.MutantID)
+			continue
+		}
+		loc := res.Locations[0].PhysicalLocation
+		src, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(loc.ArtifactLocation.URI)))
+		if err != nil {
+			t.Errorf("uri %q does not resolve from the repo root: %v", loc.ArtifactLocation.URI, err)
+			continue
+		}
+		lines := strings.Split(string(src), "\n")
+		if n := loc.Region.StartLine; n < 1 || n > len(lines) || lines[n-1] != m.OriginalLine {
+			t.Errorf("%s: line %d of %s is not the mutated line %q",
+				m.ID, loc.Region.StartLine, loc.ArtifactLocation.URI, m.OriginalLine)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("the weak run produced no survivor results to check")
 	}
 }

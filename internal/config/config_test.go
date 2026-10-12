@@ -37,6 +37,13 @@ func TestValidateRejects(t *testing.T) {
 		{"bad report", func(c *Config) { c.Reports = []ReportFormat{"pdf"} }, `unknown --report format "pdf"`},
 		{"unknown mutator", func(c *Config) { c.Mutators = []string{"nope"} }, `unknown mutator "nope"`},
 		{"unknown excluded mutator", func(c *Config) { c.ExcludeMutators = []string{"nope"} }, `unknown mutator "nope"`},
+		{"negative shard count", func(c *Config) { c.ShardCount = -1 }, "--shard-count cannot be negative"},
+		{"negative shard index", func(c *Config) { c.ShardIndex = -1 }, "--shard-index cannot be negative"},
+		{"index without count", func(c *Config) { c.ShardIndex = 2 }, "--shard-index needs --shard-count"},
+		{"count without index", func(c *Config) { c.ShardCount = 4 }, "--shard-count needs --shard-index"},
+		{"index past count", func(c *Config) { c.ShardIndex, c.ShardCount = 5, 4 }, "--shard-index must be between 1 and 4"},
+		{"zero-based index", func(c *Config) { c.ShardIndex, c.ShardCount = 0, 4 }, "--shard-count needs --shard-index"},
+		{"threshold on a shard", func(c *Config) { c.ShardIndex, c.ShardCount, c.Threshold = 1, 4, 70 }, "gate on the merged report"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +57,23 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// A matrix of size one is a normal run: it must accept a threshold and be
+// reported as unsharded, or a pipeline templated over shard count breaks at N=1.
+func TestASingleShardIsAnUnshardedRun(t *testing.T) {
+	c := validConfig()
+	c.ShardIndex, c.ShardCount, c.Threshold = 1, 1, 70
+	if err := c.Validate(known); err != nil {
+		t.Fatalf("--shard-index 1 --shard-count 1 should validate, got %v", err)
+	}
+	if c.Sharded() {
+		t.Error("a single shard should not count as sharded")
+	}
+	c.ShardIndex, c.ShardCount = 2, 3
+	if !c.Sharded() {
+		t.Error("shard 2 of 3 should count as sharded")
 	}
 }
 

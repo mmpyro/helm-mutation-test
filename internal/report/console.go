@@ -43,10 +43,19 @@ func Console(w io.Writer, run *model.Run, colour bool) error {
 
 func writeScore(b *strings.Builder, run *model.Run, c colours) {
 	score := run.Score()
-	fmt.Fprintf(b, "  Score  %s  %s   (%d killed / %d survived)\n",
+	label := "Score"
+	if run.IsSlice() {
+		label = "Slice"
+	}
+	fmt.Fprintf(b, "  %s  %s  %s   (%d killed / %d survived)\n",
+		label,
 		c.forScore(score, fmt.Sprintf("%5.1f%%", score)),
 		bar(score, 26, c),
 		run.Tally.Killed, run.Tally.Survived)
+	if run.IsSlice() {
+		// Directly under the number, so it cannot be read without its qualifier.
+		fmt.Fprintf(b, "  %s\n", c.warn(sliceNotice(run)))
+	}
 
 	// Everything excluded from the score is listed explicitly, so the number is
 	// never mistaken for "all mutants were caught".
@@ -83,7 +92,11 @@ func writeScore(b *strings.Builder, run *model.Run, c colours) {
 		// Never let a truncated run read as full coverage.
 		fmt.Fprintf(b, "  %s\n", c.warn(fmt.Sprintf(
 			"only %d of %d generated mutants were run (--max-mutants); %d not evaluated",
-			len(run.Mutants), run.Generated, run.Capped)))
+			selectedCount(run), run.Considered(), run.Capped)))
+	}
+	for _, n := range incrementalNotices(run) {
+		// A diff-only score must not read as a score over the whole chart.
+		fmt.Fprintf(b, "  %s\n", c.warn(n))
 	}
 	b.WriteString("\n")
 }
