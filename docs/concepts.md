@@ -447,9 +447,25 @@ Two related invariants worth knowing about:
 
 ## Pipeline
 
+```mermaid
+flowchart LR
+    DIS["discover<br/><small>templates + values.yaml</small>"] --> BASE["baseline<br/><small>suites must pass</small>"]
+    BASE --> COV["coverage index<br/><small>file → suites</small>"]
+    COV --> GEN["generate mutants<br/><small>9 mutators, seeded</small>"]
+    GEN --> EVAL["evaluate<br/><small>worker subprocesses</small>"]
+    EVAL --> EQ{{"equivalence<br/><small>survivors only</small>"}}
+    EQ --> REP["report<br/><small>six formats</small>"]
+
+    click DIS href "../getting-started/#what-gets-mutated" "Which chart files are mutated"
+    click BASE href "#the-baseline-gate-is-a-hard-stop" "A red baseline stops the run with exit code 2"
+    click COV href "#coverage-aware-suite-selection" "Each mutant runs only the suites that render its file"
+    click GEN href "../mutators/" "The nine mutators"
+    click EVAL href "#operational-note-why-workers-are-subprocesses" "Why parallel workers are subprocesses"
+    click EQ href "#equivalent-mutants" "Survivors that cannot change any rendered manifest"
+    click REP href "../reports/" "All six report formats"
 ```
-discover → baseline → coverage index → generate mutants → evaluate (workers) → report
-```
+
+On the docs site, hover a box for its role and click it to jump to the section that explains it.
 
 **Mutations are located with a parser but applied as byte edits.** Templates are parsed with Go's
 `text/template/parse` (with `SkipFuncCheck`, so no sprig or Helm funcmap is needed) and `values.yaml`
@@ -462,4 +478,4 @@ tree, which is what makes it possible to name the exact assertion that caught ea
 distinguish a failed assertion (a real kill) from a render error (which every test "catches", and so
 grades nothing).
 
-Package responsibilities are listed in the repository's [`CLAUDE.md`](../CLAUDE.md#architecture).
+Package responsibilities are listed in the repository's [`CLAUDE.md`](https://github.com/mmpyro/helm-mutation-test/blob/main/CLAUDE.md#architecture).

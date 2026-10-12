@@ -1,7 +1,7 @@
 # helm-mutation-test
 
 <p align="center">
-  <img src="logo.png" alt="helm-mutation-test logo">
+  <img src="docs/images/logo.png" alt="helm-mutation-test logo">
 </p>
 
 A Helm plugin that measures how much your [helm-unittest](https://github.com/helm-unittest/helm-unittest)
@@ -249,7 +249,7 @@ make demo    # score the fixture chart with both suites
 
 | page | covers |
 |---|---|
-| [Quickstart and index](docs/README.md) | installation, a first run, where to go next |
+| [Quickstart and index](docs/getting-started.md) | installation, a first run, where to go next |
 | [CLI reference](docs/cli-reference.md) | every flag, with defaults and exit codes |
 | [Mutators](docs/mutators.md) | all nine mutators, with before/after examples |
 | [Reports](docs/reports.md) | all six output formats, with samples |

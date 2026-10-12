@@ -1,4 +1,4 @@
-# helm-mutation-test documentation
+# Getting started
 
 `helm unittest` tells you whether your chart tests pass. It cannot tell you whether they are
 worth anything. This tool answers the second question: it breaks the chart on purpose, one small
@@ -54,24 +54,31 @@ Reproduce both with `make demo`.
 
 ### 1. Install
 
-```console
-helm plugin install https://github.com/mmpyro/helm-mutation-test
-```
+=== "Helm 4"
 
-On Helm 4, add `--verify=false`: it declines unsigned plugin sources by default.
+    ```console
+    # Helm 4 declines unsigned plugin sources by default
+    helm plugin install https://github.com/mmpyro/helm-mutation-test --verify=false
+    ```
 
-This downloads a checksum-verified prebuilt binary (linux and macOS, amd64 and arm64), so no Go
+=== "Helm 3"
+
+    ```console
+    helm plugin install https://github.com/mmpyro/helm-mutation-test
+    ```
+
+=== "From a checkout"
+
+    ```console
+    make install
+    ```
+
+    A checkout always builds from source, so `make install` installs the tree you are editing
+    rather than the last release.
+
+`helm plugin install` downloads a checksum-verified prebuilt binary (linux and macOS, amd64 and arm64), so no Go
 toolchain is needed. Anywhere else, or if the download fails, it builds from source and does need
 Go.
-
-Or from a checkout of this repository:
-
-```console
-make install
-```
-
-A checkout always builds from source, so `make install` installs the tree you are editing rather
-than the last release.
 
 The chart you point it at needs helm-unittest-style suites; the tool is pinned to
 helm-unittest v1.1.2.

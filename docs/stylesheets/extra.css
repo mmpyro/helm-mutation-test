@@ -1,0 +1,15 @@
+.hmt-hero {
+  text-align: center;
+  padding: 1rem 0 0.5rem;
+}
+.hmt-hero h1 {
+  margin-bottom: 0.4rem;
+  font-weight: 700;
+}
+.hmt-hero .md-button {
+  margin: 0.25rem;
+}
+/* Clickable nodes in the pipeline diagram. */
+.mermaid .clickable {
+  cursor: pointer;
+}
