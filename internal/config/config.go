@@ -29,11 +29,12 @@ const (
 	ReportHTML     ReportFormat = "html"
 	ReportMarkdown ReportFormat = "markdown"
 	ReportJUnit    ReportFormat = "junit"
+	ReportSARIF    ReportFormat = "sarif"
 )
 
 // AllReportFormats is every supported --report value.
 var AllReportFormats = []ReportFormat{
-	ReportConsole, ReportJSON, ReportHTML, ReportMarkdown, ReportJUnit,
+	ReportConsole, ReportJSON, ReportHTML, ReportMarkdown, ReportJUnit, ReportSARIF,
 }
 
 // DefaultIncludes are the chart files mutated when --include is not given.

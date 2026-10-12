@@ -97,7 +97,7 @@ Examples:
 
   # Fail CI below 70%, and write reports a CI job can publish
   helm mutation-test ./my-chart --threshold 70 \
-    --report console,markdown,html,junit --report-dir ./mutation
+    --report console,markdown,html,junit,sarif --report-dir ./mutation
 
   # Per-PR CI: score only what the branch changed
   helm mutation-test ./my-chart --since origin/main --threshold 70
@@ -162,7 +162,7 @@ Examples:
 
 	// Output.
 	f.StringSliceVar(&reports, "report", []string{string(config.ReportConsole)},
-		"report formats: console, json, html, markdown, junit")
+		"report formats: console, json, html, markdown, junit, sarif")
 	f.StringVar(&cfg.ReportDir, "report-dir", cfg.ReportDir, "directory for file reports")
 	f.Float64Var(&cfg.Threshold, "threshold", 0,
 		"exit 1 if the mutation score is below this percentage (0 disables the check)")

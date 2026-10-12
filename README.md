@@ -87,7 +87,7 @@ helm mutation-test ./my-chart
 ```console
 # Fail CI below 70%, and write reports the job can publish
 helm mutation-test ./my-chart --threshold 70 \
-  --report console,markdown,html,junit --report-dir ./mutation
+  --report console,markdown,html,junit,sarif --report-dir ./mutation
 
 # Per-PR: score only what the branch changed (needs fetch-depth: 0 in CI)
 helm mutation-test ./my-chart --since origin/main --threshold 70
@@ -186,6 +186,9 @@ happened, the same way it states a truncation.
 - **markdown** — sized for `$GITHUB_STEP_SUMMARY` or a PR comment.
 - **junit** — one `testcase` per mutant. **Survived becomes a `failure`**, since a survivor is the
   defect worth failing a build over; killed mutants pass, and the non-grading statuses are skipped.
+- **sarif** — SARIF 2.1.0 for GitHub code scanning and editor Problems panels. Each survivor is
+  annotated on the line it mutated; each untested template is one alert. Everything left out of the
+  results is named in the run's notifications.
 
 ## How it works
 
@@ -243,7 +246,7 @@ make demo    # score the fixture chart with both suites
 | [Quickstart and index](docs/README.md) | installation, a first run, where to go next |
 | [CLI reference](docs/cli-reference.md) | every flag, with defaults and exit codes |
 | [Mutators](docs/mutators.md) | all nine mutators, with before/after examples |
-| [Reports](docs/reports.md) | all five output formats, with samples |
+| [Reports](docs/reports.md) | all six output formats, with samples |
 | [Concepts](docs/concepts.md) | the score, the six statuses, the baseline gate |
 
 ## Known limits

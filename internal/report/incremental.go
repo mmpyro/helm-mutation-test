@@ -7,7 +7,7 @@ import (
 )
 
 // incrementalNotices is the wording every format uses for a --since run, so the
-// five reports cannot drift into saying different things about what was left
+// six reports cannot drift into saying different things about what was left
 // out. Empty for a full run without --since.
 func incrementalNotices(run *model.Run) []string {
 	inc := run.Incremental

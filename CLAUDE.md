@@ -20,7 +20,7 @@ make lint        # go vet + gofmt check
 make demo        # score the fixture chart with both suites
 make install     # install as a real Helm plugin from this directory
 
-make integration-tests  # black-box CLI tests: exit codes, all five report formats
+make integration-tests  # black-box CLI tests: exit codes, all six report formats
 ```
 
 `make test` does not include the integration suite: `test/integration` is behind a
@@ -64,7 +64,7 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | `internal/workspace` | Per-worker chart copies; write/restore a mutation |
 | `internal/runner` | helm-unittest seam, baseline gate, executor, classification, session |
 | `internal/equivalence` | Decide whether a mutation can change any rendered manifest. Imports Helm, never `runner`. |
-| `internal/report` | Five output formats, each a pure function of `model.Run` |
+| `internal/report` | Six output formats, each a pure function of `model.Run` |
 | `internal/model` | `Run`, `Mutant`, `Status`, `Tally` — the canonical model |
 | `test/integration` | Black-box tests of the built binary: exit codes, flags, every report format |
 
@@ -83,7 +83,7 @@ Two boundaries are load-bearing and should stay intact:
 Everything else — no-coverage, invalid, timeout, error, and anything dropped by
 `--max-mutants` — is excluded from the score *and named explicitly in every report
 format*. A silently truncated or filtered run would read as full coverage. If you
-add a status or a cap, surface it in all five formats.
+add a status or a cap, surface it in all six formats.
 
 **`Equivalent` is the fourth excluded status**, alongside no-coverage, invalid and
 the mutation-control caps: a mutation that provably cannot change any rendered
@@ -120,7 +120,7 @@ error. Watch the invalid rate: `TestInvalidMutantRateIsLow` fails above 20%.
 non-partial template's own mutants and every file a changed suite covers; *any* other changed chart
 path forces a full run, with the path named in `Run.Incremental.FullRunReason`. An unrecognised file
 might be read through `.Files.Get`, so ignoring it would skip mutants whose verdict may have moved.
-Like `--max-mutants`, the skipped count is named in all five formats via
+Like `--max-mutants`, the skipped count is named in all six formats via
 `report.incrementalNotices`. `internal/incremental` imports nothing from this module, like
 `coverage`. A `--since` run that scores nothing passes `--threshold` (`Run.NothingToScore`); a full
 run that scores nothing still fails.
@@ -270,5 +270,5 @@ error messages, `docs/reports.md`'s JSON sample, and
 
 ## Out of scope for now
 
-SARIF output, mutant caching across runs,
+Mutant caching across runs,
 higher-order mutants, subchart-aware scoring.
