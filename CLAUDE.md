@@ -71,7 +71,7 @@ discover → baseline → coverage index → generate mutants → evaluate (work
 | package | responsibility |
 |---|---|
 | `internal/source` | Load chart files; locate mutations via parser, apply as byte edits |
-| `internal/mutator` | The 9 mutators + registry + deterministic plan generation |
+| `internal/mutator` | The 10 mutators + registry + deterministic plan generation |
 | `internal/coverage` | Map a chart file to the suites that render it. Dependency-free by design |
 | `internal/incremental` | `--since`: list changed files via git, classify them into a selection. Dependency-free |
 | `internal/workspace` | Per-worker chart copies; write/restore a mutation |
@@ -136,8 +136,11 @@ helm unittest -f 'tests/strong_test.yaml' /tmp/probe   # should be killed
 ```
 
 If it survives one and is killed by the other, it is a useful mutant — do not guard
-it. The only justified guard is `include`/`template` target strings, which genuinely
-error. Watch the invalid rate: `TestInvalidMutantRateIsLow` fails above 20%.
+it. The justified guards are the ones that error whatever the values: `include`/`template`
+target strings, and `pipe-drop`'s two exclusions (`int`/`int64`/`float64`, and a serialiser
+feeding `indent`/`nindent`), each measured at 100% `Invalid` on the fixture — see
+`docs/adr/0005-pipe-drop-mutator.md`. Watch the invalid rate: `TestInvalidMutantRateIsLow`
+fails above 20%.
 
 **`--since` narrows only what it can attribute.** `internal/incremental.Classify` keeps a changed
 non-partial template's own mutants and every file a changed suite covers; *any* other changed chart

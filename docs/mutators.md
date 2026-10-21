@@ -1,6 +1,6 @@
 # Mutators
 
-Nine mutators, each producing one kind of small, single-site change. Every one reports a byte-range
+Ten mutators, each producing one kind of small, single-site change. Every one reports a byte-range
 edit against the *original* file bytes; nothing is ever rewritten in place. That keeps formatting
 exact — including Helm's whitespace-sensitive `{{-` trim markers — and lets a worker apply and revert
 one edit cheaply.
@@ -10,7 +10,7 @@ Select with `--mutators`, subtract with `--exclude-mutators`. See
 
 ## At a glance
 
-Counts below are from the fixture chart `testdata/charts/sample`, 458 mutants total, scored twice:
+Counts below are from the fixture chart `testdata/charts/sample`, 472 mutants total, scored twice:
 once against its deliberately weak 4-test suite and once against its thorough 43-test one.
 
 | ID | mutates | mutants | invalid | weak k/s | strong k/s |
@@ -20,6 +20,7 @@ once against its deliberately weak 4-test suite and once against its thorough 43
 | [`cond-negate`](#cond-negate) | `if` / `else if` / `with` conditions | 19 | 0 | 0/10 | 19/0 |
 | [`default-drop`](#default-drop) | `\| default X` pipeline segments | 7 | 0 | 0/4 | 7/0 |
 | [`num-literal`](#num-literal) | numeric literals | 87 | 5 | 0/55 | 68/14 |
+| [`pipe-drop`](#pipe-drop) | `quote`, `toYaml`, `trunc` and similar pipeline functions | 14 | 0 | 0/4 | 9/5 |
 | [`range-empty`](#range-empty) | `range` loop expressions | 0 | 0 | — | — |
 | [`required-drop`](#required-drop) | `required` guards | 3 | 0 | 0/2 | 3/0 |
 | [`str-literal`](#str-literal) | string literals | 83 | 0 | 2/52 | 83/0 |
@@ -31,15 +32,16 @@ worth naming as a status that scored nothing — a blank row would read as "ran 
 
 `k/s` is killed/survived, counting a mutant as "survived" whenever every covering test still passed —
 the raw outcome before the tool's automatic equivalence check runs. The weak suite's zeros are the
-headline: **six of the mutators that fire on this chart score 0.0% against it**, because a suite of `isKind` and `exists`
+headline: **seven of the mutators that fire on this chart score 0.0% against it**, because a suite of `isKind` and `exists`
 assertions cannot notice *anything* about content. Its weak-column totals are smaller than the mutant
 totals because it declares only two of the chart's seven templates, so the rest are `NoCoverage`.
 
-Only two mutators leave any such case against the strong suite, and **every one of those 21 is an
-[equivalent mutant](concepts.md#equivalent-mutants)** — unkillable by construction, in the two patterns
-noted under [`num-literal`](#num-literal) and [`yaml-key-delete`](#yaml-key-delete). The tool detects
+Only three mutators leave any such case against the strong suite, and **every one of those 26 is an
+[equivalent mutant](concepts.md#equivalent-mutants)** — unkillable by construction, in the patterns
+noted under [`num-literal`](#num-literal), [`pipe-drop`](#pipe-drop) and
+[`yaml-key-delete`](#yaml-key-delete). The tool detects
 this automatically and reports them as `Equivalent`, not `Survived`: a real run of `helm-mutation-test`
-against the strong suite shows `0 survived` for both mutators, with the 14 and 7 above counted under
+against the strong suite shows `0 survived` for all three, with the 14, 5 and 7 above counted under
 `Equivalent` instead. Against mutants that *can* be killed, the strong suite scores 100% — a real
 number now, not an aspiration, since nothing is left in the denominator that no suite could ever kill.
 
@@ -52,6 +54,7 @@ Which assertion types actually did the killing in the strong run, measured from 
 | `cond-negate` | `equal` ×9, `lengthEqual` ×5, `hasDocuments` ×4, `notExists` ×1 |
 | `default-drop` | `equal` ×7 |
 | `num-literal` | `equal` ×65, `hasDocuments` ×2, `lengthEqual` ×1 |
+| `pipe-drop` | `equal` ×9 |
 | `range-empty` | — (does not fire on this chart) |
 | `required-drop` | `failedTemplate` ×3 |
 | `str-literal` | `equal` ×63, `isAPIVersion` ×7, `isKind` ×7, `failedTemplate` ×3, `lengthEqual` ×2, `notExists` ×1 |
@@ -73,6 +76,7 @@ answer.
 | `cond-negate` | ✔ | | |
 | `default-drop` | ✔ | | |
 | `num-literal` | ✔ | ✔ | ✔ |
+| `pipe-drop` | ✔ | | |
 | `range-empty` | ✔ | | |
 | `required-drop` | ✔ | | |
 | `str-literal` | ✔ | ✔ | ✔ |
@@ -380,6 +384,72 @@ by plain `equal`.
 
 ---
 
+## `pipe-drop`
+
+**Remove a type- or format-changing function from a pipeline, keeping the value it was applied to.**
+
+Both call forms are mutated: a piped segment is removed whole, and a prefix call loses the function
+and any leading arguments.
+
+| before | after |
+|---|---|
+| `{{ .Values.port \| quote }}` | `{{ .Values.port }}` |
+| `{{ .Release.Name \| trunc 63 \| trimSuffix "-" }}` | `{{ .Release.Name \| trimSuffix "-" }}`, and separately `{{ .Release.Name \| trunc 63 }}` |
+| `{{ quote .Values.deep.x }}` | `{{ .Values.deep.x }}` |
+| `{{ toYaml .Values.annotations }}` | `{{ .Values.annotations }}` |
+| `{{ eq (.Values.mode \| lower) "fast" }}` | `{{ eq (.Values.mode) "fast" }}` |
+
+The functions it drops: `quote`, `squote`, `toString`, `toYaml`, `toJson`, `toPrettyJson`, `trim`,
+`lower`, `upper`, `title`, `b64enc`, and — together with their leading argument — `trunc`,
+`trimPrefix` and `trimSuffix`.
+
+Not mutated: `default` and `required`, which have mutators of their own; `include`, `tpl` and
+`printf`, which produce the value rather than transform it; `indent`/`nindent`, whose widths
+`num-literal` already perturbs; and a call whose argument count is not the known shape — `quote` is
+variadic, and dropping it from `quote .Values.a .Values.b` would keep only one of the two values.
+
+**Two exclusions, both measured rather than assumed.** Before they were added, all seven such mutants
+in the fixture chart rendered `Invalid`:
+
+| left out | why | fixture evidence |
+|---|---|---|
+| `int`, `int64`, `float64` | Helm decodes every values number as float64, so the conversions exist to feed a comparison against an integer literal | 4 of 4 sites: `incompatible types for comparison: float64 and int` |
+| `toYaml`, `toJson`, `toPrettyJson` feeding `indent`/`nindent` | an indenter accepts only a string, so it is handed the map itself | 3 of 3 sites: `wrong type for value; expected string; got map[string]interface {}` |
+
+A serialiser *not* followed by an indenter is still mutated, as in the table above.
+
+**Before / after.** A numeric config value, `templates/configmap.yaml:10`:
+
+```diff
+-  max-connections: {{ .Values.config.maxConnections | quote }}
++  max-connections: {{ .Values.config.maxConnections }}
+```
+
+ConfigMap `data` values must be strings, and so must `env[].value`; the unquoted form renders the
+integer `256`, which the API server rejects.
+
+**Why it matters.** These functions decide the *type* or *shape* of what renders, not just its
+content. Dropping `quote` turns the string `"8080"` into the integer `8080`; dropping `trunc 63` lets a
+generated name exceed the 63-character DNS label limit; dropping `trimSuffix "-"` leaves a trailing
+dash Kubernetes refuses. A suite that asserts presence, or compares a value without its type, never
+notices.
+
+**The weak test it exposes.** An `exists` on a field instead of an `equal` on its exact value, and no
+test with a release name long enough to reach `trunc`. The fixture yields 14 `pipe-drop` mutants:
+12 `quote`, one `trunc 63` and one `trimSuffix "-"`. The weak suite kills none of its 4 scored drops.
+The strong suite kills 9, all by `equal`: seven `| quote` drops on numbers and booleans it pins as
+strings (`"256"`, `"true"`), and both `_helpers.tpl:3` segments, caught by a test that renders a
+release name long enough to be truncated.
+
+**The 5 left unkilled in the strong run are all `| quote` on a value that is already a plain string**
+— `.Chart.AppVersion`, `config.logLevel`, `config.logFormat`, the `ternary` result at
+`configmap.yaml:18` and `apiToken` — and the tool reports them as `Equivalent`: YAML parses `info` and
+`"info"` to the same string, so no assertion can tell the two renders apart. Against the weak suite the
+two `_helpers.tpl:3` segments are equivalent too, because none of its four tests renders a name long
+enough for `trunc` to change anything.
+
+---
+
 ## `range-empty`
 
 **Force a `range` loop to iterate zero times: `range X` → `range list`.**
@@ -571,7 +641,7 @@ explicitly rather than assuming them.
 **Delete a key together with its nested block.**
 
 The bluntest and often most revealing mutator, and by volume the largest: 231 of the fixture chart's
-458 mutants.
+472 mutants.
 
 For `values.yaml` it uses the YAML node tree, which knows the real structure. For templates it works
 line by line, because a template is not valid YAML before rendering and so has no node tree to
@@ -662,11 +732,11 @@ values.yaml:89  adminEmail: …          → execution error: adminEmail is requ
 ```
 
 *(7 of 15 shown.)* Those are correctly excluded from the score: every test "catches" them regardless
-of what it asserts. Twenty invalid out of 458 keeps the rate at 4.4%, well under the 20% ceiling that
+of what it asserts. Twenty invalid out of 472 keeps the rate at 4.2%, well under the 20% ceiling that
 `TestInvalidMutantRateIsLow` enforces.
 
 If this mutator dominates your report and you want a quicker signal, `--exclude-mutators
-yaml-key-delete` leaves the seven more surgical ones.
+yaml-key-delete` leaves the nine more surgical ones.
 
 ---
 
@@ -681,7 +751,9 @@ helm unittest -f 'tests/weak_test.yaml'   /tmp/probe   # should survive
 helm unittest -f 'tests/strong_test.yaml' /tmp/probe   # should be killed
 ```
 
-If it survives one and is killed by the other, it is a useful mutant — do not guard it. Note that
+If it survives one and is killed by the other, it is a useful mutant — do not guard it. A guard is
+justified only where the mutation errors whatever the values, as `pipe-drop`'s
+[two exclusions](#pipe-drop) do. Note that
 "sometimes breaks rendering" is not grounds for a guard either: `num-literal` on `nindent` produces 14
 survivors, 9 kills and 5 invalids on the fixture chart, and the useful signal in the first two
 outweighs the noise in the third. Watch the invalid rate as you go; `TestInvalidMutantRateIsLow` fails

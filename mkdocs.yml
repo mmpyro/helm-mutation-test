@@ -22,6 +22,7 @@ nav:
       - "ADR-0002: Equivalent-mutant detection": adr/0002-equivalent-mutant-detection.md
       - "ADR-0003: range-empty mutator": adr/0003-range-empty-mutator.md
       - "ADR-0004: Incremental mode": adr/0004-incremental-mode.md
+      - "ADR-0005: pipe-drop mutator": adr/0005-pipe-drop-mutator.md
 
 theme:
   name: material

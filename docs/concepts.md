@@ -81,7 +81,7 @@ templates/deployment.yaml:19  num-literal  (nindent 8 → 0)  →  Invalid
 In both cases nothing rendered, so nothing was graded.
 
 A high invalid rate is a bug in this tool, not in your suite. The repository's
-`TestInvalidMutantRateIsLow` fails above 20%; the fixture chart sits at 20 invalid out of 458 — 4.4%.
+`TestInvalidMutantRateIsLow` fails above 20%; the fixture chart sits at 20 invalid out of 472 — 4.2%.
 
 **`NoCoverage` is not a survivor.** If no suite renders a template, its mutants never run. Calling
 them "survived" would blame your tests for something they never had the chance to catch; calling them
@@ -89,11 +89,11 @@ them "survived" would blame your tests for something they never had the chance t
 per file.
 
 The fixture chart's weak suite illustrates this at scale. It declares only two of the chart's seven
-templates, so **163 of its 458 mutants — 36% — never run at all**:
+templates, so **173 of its 472 mutants — 37% — never run at all**:
 
 ```
-  NO COVERAGE (163)
-    templates/configmap.yaml — no suite renders this template (56 mutants never run)
+  NO COVERAGE (173)
+    templates/configmap.yaml — no suite renders this template (66 mutants never run)
     templates/hpa.yaml — no suite renders this template (39 mutants never run)
     templates/ingress.yaml — no suite renders this template (35 mutants never run)
     templates/poddisruptionbudget.yaml — no suite renders this template (20 mutants never run)
@@ -102,8 +102,8 @@ templates, so **163 of its 458 mutants — 36% — never run at all**:
 
 Those five lines are a different and more serious finding than a low score: five entire templates are
 untested. Fix them by adding suites, not by adding assertions to the suites you have. Note the two
-gaps compound — the weak suite scores 2.3% on the 295 mutants it *did* run, on top of never running
-the other 163.
+gaps compound — the weak suite scores 2.3% on the 299 mutants it *did* run, on top of never running
+the other 173.
 
 The strong suite has zero no-coverage mutants over the same chart, because it declares all seven
 templates across its seven suites.
@@ -223,9 +223,11 @@ renders anything — that is a vacuous pass, not equivalence.
 
 ### The two patterns that show up in Helm charts
 
-Both are visible in the fixture chart, whose strong suite's equivalence pass finds 21 equivalent
-mutants — every survivor the killed/survived split alone would have left behind — confirmed by the
-by-hand comparison above under both default values and with every feature toggle enabled:
+Both are visible in the fixture chart, whose strong suite's equivalence pass finds 26 equivalent
+mutants — every survivor the killed/survived split alone would have left behind. 21 of them are these
+two patterns, confirmed by the by-hand comparison above under both default values and with every
+feature toggle enabled; the other 5 are `pipe-drop` removing a `| quote` from a value that is already
+a plain string, which YAML parses to the same string either way:
 
 **1. An `indent` / `nindent` width incremented by one.** YAML does not care about a block mapping's
 absolute indentation, only that it is deeper than its parent. So `nindent 4 → 5` emits different bytes
@@ -265,8 +267,8 @@ set, not just the default one.
 
 ### What this means for a score
 
-The fixture chart's strong suite scores **100.0%** — 417 killed, 0 survived, 21 equivalent. Every
-mutant the suite could possibly kill, it killed; the 21 that remain are excluded from the denominator
+The fixture chart's strong suite scores **100.0%** — 426 killed, 0 survived, 26 equivalent. Every
+mutant the suite could possibly kill, it killed; the 26 that remain are excluded from the denominator
 rather than depressing the score by an amount no suite could ever recover.
 
 So a survivor that remains after the equivalence check has already had this reasoning applied to it —
@@ -383,13 +385,13 @@ $ ./bin/helm-mutation-test testdata/charts/sample -f 'tests/strong_test.yaml' \
 
 Mutation testing sample  (7 suites, 43 tests, baseline 40ms)
 
-  Score  100.0%  ██████████████████████████   (18 killed / 0 survived)
-  not scored: 1 equivalent · 1 invalid
-  only 20 of 458 generated mutants were run (--max-mutants); 438 not evaluated
+  Score  100.0%  ██████████████████████████   (19 killed / 0 survived)
+  not scored: 1 equivalent
+  only 20 of 472 generated mutants were run (--max-mutants); 452 not evaluated
 ```
 
 This particular sample happens to score the same 100.0% as the full run, but that is not something to
-rely on — it is a sample of 20 out of 458, under 5% of the population, and the warning line is there so
+rely on — it is a sample of 20 out of 472, under 5% of the population, and the warning line is there so
 nobody quotes it as the score regardless of whether the numbers happen to line up.
 
 The same applies to the markdown format's survivor list, which caps at 40 entries and then says
@@ -451,7 +453,7 @@ Two related invariants worth knowing about:
 flowchart LR
     DIS["discover<br/><small>templates + values.yaml</small>"] --> BASE["baseline<br/><small>suites must pass</small>"]
     BASE --> COV["coverage index<br/><small>file → suites</small>"]
-    COV --> GEN["generate mutants<br/><small>9 mutators, seeded</small>"]
+    COV --> GEN["generate mutants<br/><small>10 mutators, seeded</small>"]
     GEN --> EVAL["evaluate<br/><small>worker subprocesses</small>"]
     EVAL --> EQ{{"equivalence<br/><small>survivors only</small>"}}
     EQ --> REP["report<br/><small>six formats</small>"]
@@ -459,7 +461,7 @@ flowchart LR
     click DIS href "../getting-started/#what-gets-mutated" "Which chart files are mutated"
     click BASE href "#the-baseline-gate-is-a-hard-stop" "A red baseline stops the run with exit code 2"
     click COV href "#coverage-aware-suite-selection" "Each mutant runs only the suites that render its file"
-    click GEN href "../mutators/" "The nine mutators"
+    click GEN href "../mutators/" "The ten mutators"
     click EVAL href "#operational-note-why-workers-are-subprocesses" "Why parallel workers are subprocesses"
     click EQ href "#equivalent-mutants" "Survivors that cannot change any rendered manifest"
     click REP href "../reports/" "All six report formats"

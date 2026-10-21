@@ -128,8 +128,8 @@ func TestExitTwoForEveryCannotRun(t *testing.T) {
 func TestAMisspelledMutatorListsTheValidOnes(t *testing.T) {
 	r := run(t, fixture, "--mutators", "cond-negat")
 	for _, id := range []string{
-		"bool-flip", "comparison-swap", "cond-negate", "default-drop",
-		"num-literal", "range-empty", "required-drop", "str-literal", "yaml-key-delete",
+		"bool-flip", "comparison-swap", "cond-negate", "default-drop", "num-literal",
+		"pipe-drop", "range-empty", "required-drop", "str-literal", "yaml-key-delete",
 	} {
 		if !strings.Contains(r.Stderr, id) {
 			t.Errorf("the error does not offer %q as a valid ID:\n%s", id, r.Stderr)

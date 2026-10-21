@@ -47,10 +47,10 @@ func mustRun(t *testing.T, id string, f *source.File) []Candidate {
 
 // ---------- registry ----------
 
-func TestRegistryHasAllNineMutators(t *testing.T) {
+func TestRegistryHasAllTenMutators(t *testing.T) {
 	want := []string{
-		IDBoolFlip, IDComparisonSwap, IDCondNegate, IDDefaultDrop,
-		IDNumLiteral, IDRangeEmpty, IDRequiredDrop, IDStrLiteral, IDYAMLKeyDelete,
+		IDBoolFlip, IDComparisonSwap, IDCondNegate, IDDefaultDrop, IDNumLiteral,
+		IDPipeDrop, IDRangeEmpty, IDRequiredDrop, IDStrLiteral, IDYAMLKeyDelete,
 	}
 	got := IDs()
 	if len(got) != len(want) {
@@ -412,6 +412,11 @@ func TestDefaultDrop(t *testing.T) {
 			`tag: {{ .Values.tag | default "latest" | quote }}`,
 			`tag: {{ .Values.tag | quote }}`,
 		},
+		{
+			"default ending a parenthesised pipeline",
+			`{{ if gt (.Values.replicaCount | default 1) 1 }}x{{ end }}`,
+			`{{ if gt (.Values.replicaCount) 1 }}x{{ end }}`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -437,6 +442,128 @@ func TestDefaultDropIgnoresNonDefaultPipelines(t *testing.T) {
 		if got := mustRun(t, IDDefaultDrop, tmpl(src)); len(got) != 0 {
 			t.Errorf("%s: expected no candidates, got %d", src, len(got))
 		}
+	}
+}
+
+// ---------- pipe-drop ----------
+
+func TestPipeDrop(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			"trailing quote",
+			`port: {{ .Values.port | quote }}`,
+			[]string{`port: {{ .Values.port }}`},
+		},
+		{
+			"segment in the middle of a pipeline",
+			`tag: {{ .Values.tag | default "x" | quote | upper }}`,
+			[]string{
+				`tag: {{ .Values.tag | default "x" | upper }}`,
+				`tag: {{ .Values.tag | default "x" | quote }}`,
+			},
+		},
+		{
+			"piped function with a leading argument",
+			`name: {{ .Release.Name | trunc 63 | trimSuffix "-" }}`,
+			[]string{
+				`name: {{ .Release.Name | trimSuffix "-" }}`,
+				`name: {{ .Release.Name | trunc 63 }}`,
+			},
+		},
+		{
+			"prefix toYaml not feeding an indenter",
+			`annotations: {{ toYaml .Values.annotations }}`,
+			[]string{`annotations: {{ .Values.annotations }}`},
+		},
+		{
+			"prefix call inside a parenthesised argument",
+			`{{ if eq (lower .Values.mode) "fast" }}x{{ end }}`,
+			[]string{`{{ if eq (.Values.mode) "fast" }}x{{ end }}`},
+		},
+		{
+			// A FieldNode's Position() is past its first segment; anchoring on it
+			// would keep `.Values` glued to the dropped function.
+			"prefix call on a deep field",
+			`v: {{ quote .Values.deep.x }}`,
+			[]string{`v: {{ .Values.deep.x }}`},
+		},
+		{
+			"prefix function with a leading argument",
+			`v: {{ trunc 63 .Values.name }}`,
+			[]string{`v: {{ .Values.name }}`},
+		},
+		{
+			"piped segment inside a parenthesised pipeline",
+			`{{ eq (.Values.mode | lower) "fast" }}`,
+			[]string{`{{ eq (.Values.mode) "fast" }}`},
+		},
+		{
+			"the quote after an include, never the include",
+			`x: {{ include "chart.name" . | quote }}`,
+			[]string{`x: {{ include "chart.name" . }}`},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tmpl(tc.src)
+			got := applied(f, mustRun(t, IDPipeDrop, f))
+			slices.Sort(got)
+			want := slices.Clone(tc.want)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("got  %q\nwant %q", got, want)
+			}
+		})
+	}
+}
+
+func TestPipeDropIgnoresOtherFunctions(t *testing.T) {
+	for _, src := range []string{
+		`x: {{ .Values.a | default "y" }}`,   // default-drop's
+		`x: {{ required "msg" .Values.a }}`,  // required-drop's
+		`x: {{ .Values.a | nindent 4 }}`,     // layout, num-literal's
+		`x: {{ .Values.quote }}`,             // a field named quote
+		`x: {{ quote }}`,                     // nothing to keep
+		`x: {{ quote .Values.a .Values.b }}`, // variadic: dropping keeps only one
+	} {
+		if got := mustRun(t, IDPipeDrop, tmpl(src)); len(got) != 0 {
+			t.Errorf("%s: expected no candidates, got %q", src, spans(tmpl(src), got))
+		}
+	}
+}
+
+// TestPipeDropSkipsMutantsThatCanOnlyBeInvalid pins the two exclusions measured
+// against the sample chart, where every such mutant failed to render. Helm
+// decodes values numbers as float64, so without int a comparison against an
+// integer literal errors; and indent/nindent accept only a string, so a
+// serialiser removed in front of one hands it a map.
+func TestPipeDropSkipsMutantsThatCanOnlyBeInvalid(t *testing.T) {
+	for _, src := range []string{
+		`{{ if gt (int .Values.replicaCount) 1 }}x{{ end }}`,
+		`{{ ge (.Values.size | int64) 64 }}`,
+		`{{ ge (float64 .Values.ratio) 0.5 }}`,
+		`  {{- toYaml . | nindent 8 }}`,
+		`  {{- toJson .Values.x | indent 4 }}`,
+		`  {{- .Values.resources | toYaml | nindent 12 }}`,
+	} {
+		if got := mustRun(t, IDPipeDrop, tmpl(src)); len(got) != 0 {
+			t.Errorf("%s: expected no candidates, got %q", src, spans(tmpl(src), got))
+		}
+	}
+}
+
+// TestPipeDropDoesNotTreatAPipedSegmentAsPrefix pins that a piped command with
+// a leading argument is dropped whole: read as a prefix call, `| trunc 63`
+// would lose `trunc` and leave a dangling `| 63`.
+func TestPipeDropDoesNotTreatAPipedSegmentAsPrefix(t *testing.T) {
+	f := tmpl(`n: {{ .Values.name | trunc 63 }}`)
+	got := applied(f, mustRun(t, IDPipeDrop, f))
+	if len(got) != 1 || got[0] != `n: {{ .Values.name }}` {
+		t.Fatalf("got %q, want exactly the whole segment dropped", got)
 	}
 }
 

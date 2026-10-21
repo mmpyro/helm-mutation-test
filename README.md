@@ -39,8 +39,8 @@ Mutation testing separates them:
 
 | suite | killed | survived | equivalent | no-coverage | invalid | score |
 |---|---:|---:|---:|---:|---:|---:|
-| `weak_test.yaml` | 6 | 255 | 20 | 163 | 14 | **2.3%** |
-| `strong_test.yaml` | 417 | 0 | 21 | 0 | 20 | **100.0%** |
+| `weak_test.yaml` | 6 | 255 | 24 | 173 | 14 | **2.3%** |
+| `strong_test.yaml` | 426 | 0 | 26 | 0 | 20 | **100.0%** |
 
 Neither suite's score is measured against a denominator that includes something it never had a chance
 to catch. `no-coverage` counts mutants in the five templates the weak suite never renders at all, and
@@ -106,7 +106,7 @@ helm mutation-test merge shards/mutation-report.shard-*.json --threshold 70
 Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
   Score    2.3%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 255 survived)
-  not scored: 163 no-coverage · 20 equivalent · 14 invalid
+  not scored: 173 no-coverage · 24 equivalent · 14 invalid
   8 survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail
 
   By mutator                          killed  survived    score
@@ -142,6 +142,7 @@ red baseline is a hard stop rather than a warning.
 | `cond-negate` | Negate `if` / `else if` / `with` conditions: `COND` → `not (COND)` |
 | `bool-flip` | `true` ↔ `false` |
 | `num-literal` | Perturb numbers: `n` → `n+1`, and `n` → `0` |
+| `pipe-drop` | Remove a type- or format-changing function: `X \| quote` → `X`, `toYaml X` → `X`, `X \| trunc 63` → `X` |
 | `range-empty` | Force a `range` loop to iterate zero times: `range X` → `range list` |
 | `str-literal` | Replace a string with a sentinel |
 | `yaml-key-delete` | Delete a key and its nested block |
@@ -251,7 +252,7 @@ make demo    # score the fixture chart with both suites
 |---|---|
 | [Quickstart and index](docs/getting-started.md) | installation, a first run, where to go next |
 | [CLI reference](docs/cli-reference.md) | every flag, with defaults and exit codes |
-| [Mutators](docs/mutators.md) | all nine mutators, with before/after examples |
+| [Mutators](docs/mutators.md) | all ten mutators, with before/after examples |
 | [Reports](docs/reports.md) | all six output formats, with samples |
 | [Concepts](docs/concepts.md) | the score, the six statuses, the baseline gate |
 
