@@ -286,8 +286,8 @@ type PipeSegment struct {
 }
 
 // SegmentsOf splits a pipeline into its commands and computes each one's
-// removal span. Used by default-drop to excise `| default X` from a pipeline
-// while leaving the rest of the expression untouched.
+// removal span. Used by default-drop and pipe-drop to excise one segment from a
+// pipeline while leaving the rest of the expression untouched.
 func SegmentsOf(f *File, pipe *parse.PipeNode) []PipeSegment {
 	if isNilNode(pipe) || len(pipe.Cmds) == 0 {
 		return nil
@@ -311,13 +311,44 @@ func SegmentsOf(f *File, pipe *parse.PipeNode) []PipeSegment {
 			if i+1 < len(pipe.Cmds) {
 				seg.DropEnd = barBefore(f, int(pipe.Cmds[i+1].Position()), a.InnerStart)
 			} else {
-				seg.DropEnd = tail
+				seg.DropEnd = pipelineEnd(f, int(cmd.Position()), tail)
 			}
 			seg.Droppable = seg.DropStart > a.InnerStart && seg.DropEnd > seg.DropStart
 		}
 		out = append(out, seg)
 	}
 	return out
+}
+
+// pipelineEnd returns where the pipeline containing the command at from ends:
+// at limit for an action's top-level pipeline, or at the unmatched `)` closing a
+// parenthesised one such as `(.Values.n | default 3)`. Trailing whitespace is
+// excluded. Quoted strings are skipped so a `)` inside one does not count.
+func pipelineEnd(f *File, from, limit int) int {
+	b := f.Bytes
+	end := limit
+	depth := 0
+scan:
+	for i := from; i < limit; i++ {
+		switch b[i] {
+		case '"', '\'', '`':
+			if j := skipQuoted(b, i); j > i {
+				i = j
+			}
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				end = i
+				break scan
+			}
+			depth--
+		}
+	}
+	for end > from && isSpace(b[end-1]) {
+		end--
+	}
+	return end
 }
 
 // barBefore scans back from a command's start to its "|" separator and then over
