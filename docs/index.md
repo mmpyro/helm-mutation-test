@@ -33,12 +33,12 @@ helm mutation-test ./my-chart --since origin/main               # only what the 
 ## One chart, two green suites
 
 `testdata/charts/sample` ships two suites over the same templates. Both pass, and `helm unittest`
-reports them as equally green. The same 458 mutants, run against each:
+reports them as equally green. The same 472 mutants, run against each:
 
 | suite | killed | survived | equivalent | no-coverage | invalid | score |
 |---|---:|---:|---:|---:|---:|---:|
-| `weak_test.yaml` | 6 | 255 | 20 | 163 | 14 | **2.3%** |
-| `strong_test.yaml` | 417 | 0 | 21 | 0 | 20 | **100.0%** |
+| `weak_test.yaml` | 6 | 255 | 24 | 173 | 14 | **2.3%** |
+| `strong_test.yaml` | 426 | 0 | 26 | 0 | 20 | **100.0%** |
 
 Run `make demo` to reproduce both. The walk-through is in [Getting started](getting-started.md).
 
@@ -134,6 +134,6 @@ plugin builds from source and needs Go.
 | [Getting started](getting-started.md) | install, score a chart, read the output, wire it into CI |
 | [Concepts](concepts.md) | understand the score, the statuses, the baseline gate and equivalence |
 | [CLI reference](cli-reference.md) | look up a flag, its default, or an exit code |
-| [Mutators](mutators.md) | see what each of the nine mutators changes and which assertion it exposes |
+| [Mutators](mutators.md) | see what each of the ten mutators changes and which assertion it exposes |
 | [Reports](reports.md) | pick an output format and parse it |
 | [Decisions](adr/0001-helm-mutation-test-framework.md) | read why the tool is built the way it is |

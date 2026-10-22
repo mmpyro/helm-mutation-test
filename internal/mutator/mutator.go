@@ -24,6 +24,7 @@ const (
 	IDComparisonSwap = "comparison-swap"
 	IDRequiredDrop   = "required-drop"
 	IDRangeEmpty     = "range-empty"
+	IDPipeDrop       = "pipe-drop"
 )
 
 // Candidate is a single proposed edit to a source file.

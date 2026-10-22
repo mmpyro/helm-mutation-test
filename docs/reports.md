@@ -29,7 +29,7 @@ every survivor stays `Survived` exactly as before this feature existed — see
 says so for a `--max-mutants` truncation, rather than letting a report silently look like a run where
 none of the survivors were equivalent.
 
-All samples below are real output from `testdata/charts/sample` (458 mutants), and are marked where
+All samples below are real output from `testdata/charts/sample` (472 mutants), and are marked where
 truncated.
 
 ---
@@ -53,7 +53,7 @@ $ ./bin/helm-mutation-test testdata/charts/sample -f 'tests/weak_test.yaml' --no
 Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
   Score    2.3%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 255 survived)
-  not scored: 163 no-coverage · 20 equivalent · 14 invalid
+  not scored: 173 no-coverage · 24 equivalent · 14 invalid
   8 survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail
 
   By mutator                          killed  survived    score
@@ -62,6 +62,7 @@ Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
     cond-negate                            0        10    0.0%
     default-drop                           0         4    0.0%
     num-literal                            0        47    0.0%
+    pipe-drop                              0         0       —  not scored
     required-drop                          0         0       —  not scored
     yaml-key-delete                        4       131    3.0%
     str-literal                            2        46    4.2%
@@ -96,25 +97,25 @@ Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
   ... 252 further survivors, one block each ...
 
-  NO COVERAGE (163)
-    templates/configmap.yaml — no suite renders this template (56 mutants never run)
+  NO COVERAGE (173)
+    templates/configmap.yaml — no suite renders this template (66 mutants never run)
     templates/hpa.yaml — no suite renders this template (39 mutants never run)
     templates/ingress.yaml — no suite renders this template (35 mutants never run)
     templates/poddisruptionbudget.yaml — no suite renders this template (20 mutants never run)
     templates/serviceaccount.yaml — no suite renders this template (13 mutants never run)
 
   Equivalent  cannot change any rendered manifest; not scored
+    templates/_helpers.tpl:3:39  pipe-drop
     templates/_helpers.tpl:3:48  num-literal
-    templates/_helpers.tpl:3:64  str-literal
-    templates/deployment.yaml:6:45  num-literal
-    ... 16 further equivalent mutants ...
+    templates/_helpers.tpl:3:50  pipe-drop
+    ... 20 further equivalent mutants ...
     values.yaml:66:1  yaml-key-delete
 
   INVALID (14)
     these mutations stopped the chart rendering, so every test caught them
     they measure nothing about test quality and are excluded from the score
 
-  458 mutants in 380ms
+  472 mutants in 551ms
 ```
 
 *(Three of the 255 survivor blocks shown and the `Equivalent` list abridged, non-contiguous; the real
@@ -140,11 +141,11 @@ output prints all of them.)*
   passed`, or `ran N tests across M suite files — all passed` when several suite files covered it.
   That distinguishes a genuine survivor from an unexercised one.
 - **`NO COVERAGE` is counted per file**, because "no suite renders this template" is a per-file
-  finding; listing all 163 mutants would bury it.
+  finding; listing all 173 mutants would bury it.
 - **`Equivalent` lists every mutant the check reclassified**, each at its `file:line:column`. Unlike
   `SURVIVED` these are not diffed, since there is nothing left to fix: the detail is that no assertion
-  ever could have caught them. A mutator whose every survivor turns out equivalent — `required-drop`
-  above — shows `—  not scored` in the breakdowns rather than a `0.0%` that would read as a weak
+  ever could have caught them. A mutator whose every survivor turns out equivalent — `pipe-drop` and
+  `required-drop` above — shows `—  not scored` in the breakdowns rather than a `0.0%` that would read as a weak
   suite.
 - **`PARTIALLY ANALYSED`** appears when a file could not be fully analysed — most often a template
   that Go's parser rejected, in which case the line-based mutators still ran but the AST ones did not.
@@ -154,10 +155,10 @@ output prints all of them.)*
 ```console
 $ ./bin/helm-mutation-test testdata/charts/sample -f 'tests/strong_test.yaml' --no-color
 
-Mutation testing sample  (7 suites, 43 tests, baseline 42ms)
+Mutation testing sample  (7 suites, 43 tests, baseline 44ms)
 
-  Score  100.0%  ██████████████████████████   (417 killed / 0 survived)
-  not scored: 21 equivalent · 20 invalid
+  Score  100.0%  ██████████████████████████   (426 killed / 0 survived)
+  not scored: 26 equivalent · 20 invalid
 
   By mutator                          killed  survived    score
     bool-flip                             15         0  100.0%
@@ -165,13 +166,14 @@ Mutation testing sample  (7 suites, 43 tests, baseline 42ms)
     cond-negate                           19         0  100.0%
     default-drop                           7         0  100.0%
     num-literal                           68         0  100.0%
+    pipe-drop                              9         0  100.0%
     required-drop                          3         0  100.0%
     str-literal                           83         0  100.0%
     yaml-key-delete                      209         0  100.0%
 
   By file                             killed  survived    score
-    templates/_helpers.tpl                14         0  100.0%
-    templates/configmap.yaml              55         0  100.0%
+    templates/_helpers.tpl                16         0  100.0%
+    templates/configmap.yaml              62         0  100.0%
     templates/deployment.yaml            108         0  100.0%
     templates/hpa.yaml                    38         0  100.0%
     templates/ingress.yaml                32         0  100.0%
@@ -181,25 +183,27 @@ Mutation testing sample  (7 suites, 43 tests, baseline 42ms)
     values.yaml                          107         0  100.0%
 
   Equivalent  cannot change any rendered manifest; not scored
+    templates/_helpers.tpl:15:48  pipe-drop
     templates/configmap.yaml:6:45  num-literal
-    templates/deployment.yaml:6:45  num-literal
-    ... 18 further equivalent mutants ...
+    ... 23 further equivalent mutants ...
     values.yaml:83:1  yaml-key-delete
 
   INVALID (20)
     these mutations stopped the chart rendering, so every test caught them
     they measure nothing about test quality and are excluded from the score
 
-  458 mutants in 1.6s
+  472 mutants in 2.5s
 ```
 
-*(The `Equivalent` list abridged; the real output prints all 21.)*
+*(The `Equivalent` list abridged; the real output prints all 26.)*
 
 There is no `SURVIVED` section at all here — it is omitted because the count is zero. Every mutant
-this suite could possibly kill, it killed; the remaining 21 are the same two patterns walked through in
+this suite could possibly kill, it killed. Of the remaining 26, 21 are the two patterns walked through in
 [equivalent mutants](concepts.md#equivalent-mutants): `configmap.yaml:6` is an `nindent 4 → 5` that
 reindents a block without changing the parsed data, and `values.yaml:83` deletes `debug: false`, which
-leaves the value nil and Go templates treat nil exactly like `false`.
+leaves the value nil and Go templates treat nil exactly like `false`. The other 5 are `pipe-drop`
+removing a `| quote` from a value that is already a plain string, such as `_helpers.tpl:15`'s
+`.Chart.AppVersion`: YAML parses it to the same string with or without the quotes.
 
 Each `Equivalent` entry carries the evidence in its `detail` field in the JSON report — for example
 `identical under 43 test-job value sets; span proven executed` — so a reader does not have to take the
@@ -209,7 +213,7 @@ means and how to check it by hand.
 With a `--threshold`, the footer adds an explicit verdict line:
 
 ```
-  458 mutants in 1.5s
+  472 mutants in 2.5s
   score 100.0% meets the 70.0% threshold
 ```
 
@@ -253,21 +257,21 @@ overwrite each other.
   "threshold": 0,
   "passed": true, // (2)!
   "tally": { // (3)!
-    "killed": 417,
+    "killed": 426,
     "survived": 0,
     "noCoverage": 0,
     "invalid": 20,
-    "equivalent": 21,
+    "equivalent": 26,
     "timeout": 0,
     "error": 0
   },
   "equivalenceChecked": true, // (4)!
   "equivalenceUnchecked": 0, // (5)!
-  "generated": 458, // (6)!
+  "generated": 472, // (6)!
   "capped": 0, // (7)!
   "mutators": [
-    "bool-flip", "comparison-swap", "cond-negate", "default-drop",
-    "num-literal", "range-empty", "required-drop", "str-literal", "yaml-key-delete"
+    "bool-flip", "comparison-swap", "cond-negate", "default-drop", "num-literal",
+    "pipe-drop", "range-empty", "required-drop", "str-literal", "yaml-key-delete"
   ],
   "suites": [ // (8)!
     {
@@ -286,7 +290,7 @@ overwrite each other.
   "byMutator": [ { "name": "num-literal", "score": 100, "tally": { "...": 0 } } ],
   "byFile":    [ { "name": "templates/poddisruptionbudget.yaml", "score": 100, "tally": { "...": 0 } } ],
   "mutants":   [ "..." ],
-  "timing": { "baselineMillis": 41, "totalMillis": 1491 }
+  "timing": { "baselineMillis": 44, "totalMillis": 2534 }
 }
 ```
 
@@ -493,12 +497,12 @@ left to show, since its equivalence pass reclassifies every one.
 
 | Outcome | Count | |
 |---|---:|---|
-| Killed | 417 | a test caught the mutation |
+| Killed | 426 | a test caught the mutation |
 | Survived | 0 | **no test noticed** — a missing assertion |
-| Equivalent | 21 | cannot change any rendered manifest — unkillable |
+| Equivalent | 26 | cannot change any rendered manifest — unkillable |
 | Invalid | 20 | broke rendering, so it grades nothing |
 
-Score counts only killed and survived mutants: 417 of 458.
+Score counts only killed and survived mutants: 426 of 472.
 
 ### Score by mutator
 
@@ -509,6 +513,7 @@ Score counts only killed and survived mutants: 417 of 458.
 | `cond-negate` | 19 | 0 | 100.0% |
 | `default-drop` | 7 | 0 | 100.0% |
 | `num-literal` | 68 | 0 | 100.0% |
+| `pipe-drop` | 9 | 0 | 100.0% |
 | `required-drop` | 3 | 0 | 100.0% |
 | `str-literal` | 83 | 0 | 100.0% |
 | `yaml-key-delete` | 209 | 0 | 100.0% |
@@ -517,8 +522,8 @@ Score counts only killed and survived mutants: 417 of 458.
 
 | Name | Killed | Survived | Score |
 |---|---:|---:|---:|
-| `templates/_helpers.tpl` | 14 | 0 | 100.0% |
-| `templates/configmap.yaml` | 55 | 0 | 100.0% |
+| `templates/_helpers.tpl` | 16 | 0 | 100.0% |
+| `templates/configmap.yaml` | 62 | 0 | 100.0% |
 | `templates/deployment.yaml` | 108 | 0 | 100.0% |
 | `templates/hpa.yaml` | 38 | 0 | 100.0% |
 | `templates/ingress.yaml` | 32 | 0 | 100.0% |
@@ -531,7 +536,7 @@ Score counts only killed and survived mutants: 417 of 458.
 
 None — every covered mutation was caught.
 
-<sub>458 mutants in 1.6s · baseline 42ms</sub>
+<sub>472 mutants in 2.5s · baseline 44ms</sub>
 ````
 
 Differences from `console`:
@@ -551,8 +556,8 @@ Differences from `console`:
   There is also no per-survivor coverage note; use `console` or `json` for either.
 
 The weak run's `Survived mutants` section still shows a capped list of 40 of its 255 survivors, and its
-`Outcome` table's `Equivalent` row reads 20 — see [concepts.md](concepts.md#equivalent-mutants) for what
-distinguishes those 20 from the 255 that remain.
+`Outcome` table's `Equivalent` row reads 24 — see [concepts.md](concepts.md#equivalent-mutants) for what
+distinguishes those 24 from the 255 that remain.
 
 ---
 
@@ -579,29 +584,29 @@ One `<testsuite>` per chart file, in first-appearance order. Each testcase name 
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="helm-mutation-test:sample" tests="458" failures="0" skipped="41" time="1.5889">
-  <testsuite name="templates/_helpers.tpl" tests="14" failures="0" skipped="0" hostname="localhost">
+<testsuites name="helm-mutation-test:sample" tests="472" failures="0" skipped="46" time="2.5348">
+  <testsuite name="templates/_helpers.tpl" tests="17" failures="0" skipped="1" hostname="localhost">
     <testcase name="default-drop at templates/_helpers.tpl:2 [_helpers.tpl:66:default-drop]"
-              classname="templates/_helpers.tpl" time="0.0280"></testcase>
-    <testcase name="num-literal at templates/_helpers.tpl:3 [_helpers.tpl:140:num-literal:increment]"
-              classname="templates/_helpers.tpl" time="0.0719"></testcase>
-    ... 12 more testcases, all passing ...
+              classname="templates/_helpers.tpl" time="0.0829"></testcase>
+    <testcase name="pipe-drop at templates/_helpers.tpl:3 [_helpers.tpl:131:pipe-drop]"
+              classname="templates/_helpers.tpl" time="0.2109"></testcase>
+    ... 15 more testcases, one skipped as equivalent ...
   </testsuite>
-  <testsuite name="templates/configmap.yaml" tests="56" failures="0" skipped="1" hostname="localhost">
-    ... 5 passing testcases for lines 1-4 ...
+  <testsuite name="templates/configmap.yaml" tests="66" failures="0" skipped="4" hostname="localhost">
+    ... 7 passing testcases for lines 1-5 ...
     <testcase name="num-literal at templates/configmap.yaml:6 [configmap.yaml:144:num-literal:increment]"
               classname="templates/configmap.yaml" time="0.0189">
       <skipped message="equivalent: the mutation cannot change any rendered manifest, so no assertion could catch it"></skipped>
     </testcase>
-    ... 50 more testcases ...
+    ... 58 more testcases ...
   </testsuite>
   ... 7 more testsuites ...
 </testsuites>
 ```
 
-*(Long attributes wrapped for readability. `_helpers.tpl` has 14 testcases and zero failures or skips,
-since the strong suite kills every mutant in it outright. Note there are no `<failure>` elements
-anywhere in this run — the equivalence pass reclassified all 21 of the strong suite's would-be
+*(Long attributes wrapped for readability. `_helpers.tpl` has 17 testcases, zero failures and one skip: the
+strong suite kills every mutant in it except a `| quote` drop that cannot change the rendered string. Note there are no `<failure>` elements
+anywhere in this run — the equivalence pass reclassified all 26 of the strong suite's would-be
 survivors, so `failures="0"` across the whole file.)*
 
 A `<failure>` still looks exactly as it always did; this is real output from the weak suite, which does
@@ -659,7 +664,7 @@ format:
 ```xml
 <testsuite name="--max-mutants" tests="1" failures="0" skipped="1" hostname="localhost">
   <testcase name="truncated run" classname="--max-mutants" time="0.0000">
-    <skipped message="438 of 458 generated mutants were not evaluated (--max-mutants); this run is a sample, not full coverage"/>
+    <skipped message="452 of 472 generated mutants were not evaluated (--max-mutants); this run is a sample, not full coverage"/>
   </testcase>
 </testsuite>
 ```
@@ -721,7 +726,7 @@ The weak run (threshold 70) produces 255 survivor results and 5 no-coverage resu
 **What the results leave out is named in the invocation's `toolExecutionNotifications`:**
 
 ```text
-note     mutation score 2.3% (6 killed of 261 scored); excluded from the score: 163 no-coverage, 14 invalid, 20 equivalent, 0 timeout, 0 error
+note     mutation score 2.3% (6 killed of 261 scored); excluded from the score: 173 no-coverage, 14 invalid, 24 equivalent, 0 timeout, 0 error
 note     score 2.3% is below the 70.0% threshold
 warning  8 survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail
 ```
@@ -760,8 +765,8 @@ steps:
 A self-contained page, plus the standard-schema JSON alongside it. `--report html` writes **two**
 files:
 
-- `mutation-report.html` — 290 KB for the fixture chart
-- `mutation-report.stryker.json` — 278 KB, most of it embedded chart source
+- `mutation-report.html` — 293 KB for the fixture chart
+- `mutation-report.stryker.json` — 288 KB, most of it embedded chart source
 
 **Use it for** a CI artifact somebody will actually open, and for annotated source: seeing each
 mutation highlighted in place in the template it came from.
@@ -841,7 +846,7 @@ mutation-testing tooling consumes, and what you would hand to a hosted dashboard
 }
 ```
 
-*(One file and two of its mutants shown; the real report covers all nine files and 458 mutants.)*
+*(One file and two of its mutants shown; the real report covers all nine files and 472 mutants.)*
 
 Status mapping onto the schema's vocabulary:
 

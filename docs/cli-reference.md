@@ -82,7 +82,7 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 
 | flag | type | default | purpose |
 |---|---|---|---|
-| `--mutators` | comma-separated list | *all nine* | Which mutators to run |
+| `--mutators` | comma-separated list | *all ten* | Which mutators to run |
 | `--exclude-mutators` | comma-separated list | *(none)* | Mutators to skip |
 | `--include` | comma-separated globs | `templates/**,values.yaml` | Chart files to mutate |
 | `--exclude` | comma-separated globs | *(none)* | Chart files to skip |
@@ -97,14 +97,14 @@ helm mutation-test ./my-chart -f 'tests/*_test.yaml' -f 'charts/*/tests/*_test.y
 ### `--mutators`, `--exclude-mutators`
 
 Valid IDs: `bool-flip`, `comparison-swap`, `cond-negate`, `default-drop`, `num-literal`,
-`range-empty`, `required-drop`, `str-literal`, `yaml-key-delete`. See [mutators.md](mutators.md).
+`pipe-drop`, `range-empty`, `required-drop`, `str-literal`, `yaml-key-delete`. See [mutators.md](mutators.md).
 
 An unknown ID is rejected before the run starts, rather than silently running fewer mutators than
 you asked for:
 
 ```console
 $ helm mutation-test ./my-chart --mutators cond-negat
-Error: --mutators: unknown mutator "cond-negat" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)
+Error: --mutators: unknown mutator "cond-negat" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, pipe-drop, range-empty, required-drop, str-literal, yaml-key-delete)
 ```
 
 An empty `--mutators` means "all". `--exclude-mutators` is subtracted afterwards, so the two combine:
@@ -154,9 +154,9 @@ The drop count is surfaced in every format — a silently truncated run would re
 
 ```console
 $ helm mutation-test ./my-chart --max-mutants 20
-  Score  100.0%  ██████████████████████████   (18 killed / 0 survived)
-  not scored: 1 equivalent · 1 invalid
-  only 20 of 458 generated mutants were run (--max-mutants); 438 not evaluated
+  Score  100.0%  ██████████████████████████   (19 killed / 0 survived)
+  not scored: 1 equivalent
+  only 20 of 472 generated mutants were run (--max-mutants); 452 not evaluated
 ```
 
 A sampled score is not comparable to a full one, even when — as above — the two numbers happen to
@@ -427,7 +427,7 @@ also stops the tool silencing the Helm and helm-unittest libraries' own logging,
 $ helm mutation-test ./my-chart -d 2>&1 >/dev/null | grep '^==>'
 ==> Running the chart's tests unmutated
 ==> Planning mutants
-==> Evaluating 458 mutants across 12 workers
+==> Evaluating 472 mutants across 12 workers
 ```
 
 A `--max-mutants` run adds a phase line naming the cap and the drop count; a `--since` run adds one
@@ -490,7 +490,7 @@ Configuration is validated before the baseline runs, so a typo costs no time. Al
 | `--threshold` with `--shard-count` > 1 | `--threshold cannot be used with --shard-count: a shard is a slice, not a score; ...` |
 | bad `--kill-attribution` | `--kill-attribution must be "first" or "all", got "X"` |
 | bad `--report` | `unknown --report format "X" (valid: console, json, html, markdown, junit, sarif)` |
-| bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, range-empty, required-drop, str-literal, yaml-key-delete)` |
+| bad `--mutators` | `--mutators: unknown mutator "X" (valid: bool-flip, comparison-swap, cond-negate, default-drop, num-literal, pipe-drop, range-empty, required-drop, str-literal, yaml-key-delete)` |
 | bad `--exclude-mutators` | as above, prefixed `--exclude-mutators:` |
 
 Rejecting an unknown mutator ID rather than ignoring it is deliberate: silently running fewer

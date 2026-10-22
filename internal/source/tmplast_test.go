@@ -311,6 +311,44 @@ func TestSegmentsOfComputesDropSpans(t *testing.T) {
 	}
 }
 
+// TestSegmentsOfEndsANestedPipelineAtItsParenthesis: the last segment of a
+// parenthesised pipeline ends at its own `)`, not at the enclosing action's end.
+// Taking the action's end deletes the `)` and every argument after it, so a
+// drop of `| default 3` in `(.Values.n | default 3) 1` produced `{{ if gt (.Values.n }}`.
+func TestSegmentsOfEndsANestedPipelineAtItsParenthesis(t *testing.T) {
+	tests := []struct {
+		src  string
+		want string
+	}{
+		{`{{ if gt (.Values.n | default 3) 1 }}x{{ end }}`, `{{ if gt (.Values.n) 1 }}x{{ end }}`},
+		{`{{ eq (.Values.m | lower | default "a") "fast" }}`, `{{ eq (.Values.m | lower) "fast" }}`},
+		{`{{ ge (.Values.n | default (add 1 2)) 3 }}`, `{{ ge (.Values.n) 3 }}`},
+		{`{{ eq (.Values.s | default ")") "x" }}`, `{{ eq (.Values.s) "x" }}`},
+	}
+	for _, tc := range tests {
+		f := mk(t, tc.src)
+		tree, err := ParseTemplate(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		tree.Walk(func(n parse.Node) bool {
+			p, ok := n.(*parse.PipeNode)
+			if !ok {
+				return true
+			}
+			segs := SegmentsOf(f, p)
+			if last := len(segs) - 1; last > 0 && segs[last].Droppable && p.Cmds[0].Args[0].Type() == parse.NodeField {
+				got = append(got, string(f.Apply(segs[last].DropStart, segs[last].DropEnd, "")))
+			}
+			return true
+		})
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("%s: dropping the nested pipeline's last segment gave %q, want %q", tc.src, got, tc.want)
+		}
+	}
+}
+
 func TestSkipQuoted(t *testing.T) {
 	tests := []struct {
 		name    string

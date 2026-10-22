@@ -12,8 +12,8 @@ import (
 // JSON still needs to see that the strong suite's would-be survivors were proven
 // unkillable, not silently dropped from the score.
 //
-// The counts are the fixture's measured numbers with detection on: 417 killed,
-// 21 equivalent, 20 invalid, 0 survived — a 100.0% score.
+// The counts are the fixture's measured numbers with detection on: 426 killed,
+// 26 equivalent, 20 invalid, 0 survived — a 100.0% score.
 func TestConsoleNamesEquivalentMutantsByDefault(t *testing.T) {
 	r := run(t, fixture, "-f", "tests/strong_test.yaml")
 	if r.ExitCode != 0 {
@@ -24,7 +24,7 @@ func TestConsoleNamesEquivalentMutantsByDefault(t *testing.T) {
 	if !strings.Contains(console, "100.0%") {
 		t.Errorf("console does not report the fixture's measured 100%% score:\n%s", console)
 	}
-	if !strings.Contains(console, "not scored: 21 equivalent · 20 invalid") {
+	if !strings.Contains(console, "not scored: 26 equivalent · 20 invalid") {
 		t.Errorf("console does not name the excluded equivalent and invalid mutants:\n%s", console)
 	}
 	if !strings.Contains(console, "Equivalent") {
@@ -40,9 +40,9 @@ func TestConsoleNamesEquivalentMutantsByDefault(t *testing.T) {
 // that nothing was checked, so a reader does not mistake the lower score for a
 // regression rather than a deliberately disabled pass.
 //
-// The counts are the fixture's measured numbers with detection off: 417 killed,
-// 21 survived (the same 21 that detection would otherwise reclassify), 20
-// invalid — a 95.2% score. Exit code is unaffected: --no-equivalence-check
+// The counts are the fixture's measured numbers with detection off: 426 killed,
+// 26 survived (the same 26 that detection would otherwise reclassify), 20
+// invalid — a 94.2% score. Exit code is unaffected: --no-equivalence-check
 // changes what is measured, not whether the run succeeds.
 func TestNoEquivalenceCheckSkipsDetectionAndSaysSo(t *testing.T) {
 	r := run(t, fixture, "-f", "tests/strong_test.yaml", "--no-equivalence-check")
@@ -51,8 +51,8 @@ func TestNoEquivalenceCheckSkipsDetectionAndSaysSo(t *testing.T) {
 	}
 	console := r.Console()
 
-	if !strings.Contains(console, "95.2%") {
-		t.Errorf("console does not report the fixture's measured 95.2%% score with detection off:\n%s", console)
+	if !strings.Contains(console, "94.2%") {
+		t.Errorf("console does not report the fixture's measured 94.2%% score with detection off:\n%s", console)
 	}
 	if !strings.Contains(console, "not scored: 20 invalid") {
 		t.Errorf("console should list only the invalid exclusion, not equivalent, with the check off:\n%s", console)

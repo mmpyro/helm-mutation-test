@@ -13,7 +13,7 @@ A change that survives is a **survived mutant** — a precise pointer at a missi
 |---|---|
 | [concepts.md](concepts.md) | The mutation score, the seven statuses, why `Invalid`, `NoCoverage` and `Equivalent` are excluded, the baseline gate, coverage-aware suite selection, and why workers are subprocesses |
 | [cli-reference.md](cli-reference.md) | Every flag, grouped, with defaults, validation rules and exit codes |
-| [mutators.md](mutators.md) | All nine mutators, with a real before/after and the weak assertion each one exposes |
+| [mutators.md](mutators.md) | All ten mutators, with a real before/after and the weak assertion each one exposes |
 | [reports.md](reports.md) | All six report formats, with real sample output and when to use each |
 
 ## Why it matters: one chart, two green suites
@@ -26,12 +26,12 @@ $ helm unittest -f 'tests/weak_test.yaml'   testdata/charts/sample   # PASS,  4 
 $ helm unittest -f 'tests/strong_test.yaml' testdata/charts/sample   # PASS, 43 tests
 ```
 
-Mutation testing separates them completely. The same 458 mutants, run against each suite:
+Mutation testing separates them completely. The same 472 mutants, run against each suite:
 
 | suite | score | killed | survived | equivalent | no coverage | invalid |
 |---|---:|---:|---:|---:|---:|---:|
-| `tests/weak_test.yaml` | **2.3%** | 6 | 255 | 20 | 163 | 14 |
-| `tests/strong_test.yaml` | **100.0%** | 417 | 0 | 21 | 0 | 20 |
+| `tests/weak_test.yaml` | **2.3%** | 6 | 255 | 24 | 173 | 14 |
+| `tests/strong_test.yaml` | **100.0%** | 426 | 0 | 26 | 0 | 20 |
 
 The weak suite has four tests, asserting only `isKind` and `exists`. It is green, and it will stay
 green while the chart loses `imagePullPolicy`, changes `containerPort`, inverts every feature toggle,
@@ -99,7 +99,7 @@ exit code 2 — a score measured against a red suite is a fiction. See
 Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
 
   Score    2.3%  █░░░░░░░░░░░░░░░░░░░░░░░░░   (6 killed / 255 survived)
-  not scored: 163 no-coverage · 20 equivalent · 14 invalid
+  not scored: 173 no-coverage · 24 equivalent · 14 invalid
   8 survivors could not be checked for equivalence and may be unkillable; each one's reason is in its detail
 
   By mutator                          killed  survived    score
@@ -108,6 +108,7 @@ Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
     cond-negate                            0        10    0.0%
     default-drop                           0         4    0.0%
     num-literal                            0        47    0.0%
+    pipe-drop                              0         0       —  not scored
     required-drop                          0         0       —  not scored
     yaml-key-delete                        4       131    3.0%
     str-literal                            2        46    4.2%
@@ -174,7 +175,7 @@ Narrow or widen the set with `--include` and `--exclude`; see
 
 ## A note on runtime
 
-The fixture chart yields **458 mutants**, and a full strong-suite run over it takes about 1.7
+The fixture chart yields **472 mutants**, and a full strong-suite run over it takes about 2.5
 seconds wall-clock with 12 workers. That is the tool scoring one small chart.
 
 The repository's own test suite is much slower, because it scores the fixture several times over and
