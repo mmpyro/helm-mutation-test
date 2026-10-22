@@ -62,6 +62,11 @@ download fails. Keep that order: preferring a source build is what made `helm pl
 inside `alpine/helm`, which ships no Go. The checksum step refuses an asset it cannot account for and
 falls back to building; only a missing `sha256sum`/`shasum` downgrades to a warning.
 
+The install docs name the latest release and link its assets by version: the "Release artifacts"
+section of `README.md`, the install step of `docs/getting-started.md` and the install section of
+`docs/index.md`. After a release, bump every version in them — `grep -rn "v1\.2\.0" README.md docs/`
+with the previous tag finds them all.
+
 ## Architecture
 
 ```
