@@ -80,6 +80,31 @@ Reproduce both with `make demo`.
 toolchain is needed. Anywhere else, or if the download fails, it builds from source and does need
 Go.
 
+The latest release is [v1.2.0](https://github.com/mmpyro/helm-mutation-test/releases/tag/v1.2.0).
+To pin it, for example in CI, add `--version v1.2.0` to either `helm plugin install` command above.
+
+??? note "Downloading the binaries directly"
+
+    Each archive holds a single `helm-mutation-test` executable, which also runs on its own outside
+    Helm.
+
+    | platform | v1.2.0 asset |
+    |---|---|
+    | linux, amd64 | [`helm-mutation-test_linux_amd64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_linux_amd64.tar.gz) |
+    | linux, arm64 | [`helm-mutation-test_linux_arm64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_linux_arm64.tar.gz) |
+    | macOS, amd64 | [`helm-mutation-test_darwin_amd64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_darwin_amd64.tar.gz) |
+    | macOS, arm64 | [`helm-mutation-test_darwin_arm64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_darwin_arm64.tar.gz) |
+    | checksums | [`SHA256SUMS`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/SHA256SUMS) |
+
+    ```console
+    curl -fsSLO https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_linux_amd64.tar.gz
+    curl -fsSLO https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/SHA256SUMS
+    sha256sum --check --ignore-missing SHA256SUMS    # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+    tar -xzf helm-mutation-test_linux_amd64.tar.gz helm-mutation-test
+    ```
+
+    Older versions are on the [releases page](https://github.com/mmpyro/helm-mutation-test/releases).
+
 The chart you point it at needs helm-unittest-style suites; the tool is pinned to
 helm-unittest v1.1.2.
 

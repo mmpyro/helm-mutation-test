@@ -53,11 +53,17 @@ Run `make demo` to reproduce both.
 
 ## Install
 
+The latest release is [**v1.2.0**](https://github.com/mmpyro/helm-mutation-test/releases/tag/v1.2.0),
+which adds the [`pipe-drop`](docs/mutators.md#pipe-drop) mutator.
+
 ```console
 helm plugin install https://github.com/mmpyro/helm-mutation-test
 
 # Helm 4 refuses unsigned plugin sources unless you say so:
 helm plugin install --verify=false https://github.com/mmpyro/helm-mutation-test
+
+# Pin a release, e.g. in CI:
+helm plugin install --verify=false https://github.com/mmpyro/helm-mutation-test --version v1.2.0
 ```
 
 This downloads a prebuilt binary for linux and macOS on amd64 and arm64, verified against the
@@ -66,6 +72,28 @@ works on musl images such as `alpine/helm`.
 
 On any other platform, or if the download fails, the install falls back to building from source and
 then does need Go (https://go.dev/dl/).
+
+### Release artifacts
+
+The same binaries can be downloaded directly. Each archive holds a single `helm-mutation-test`
+executable, which also runs on its own outside Helm.
+
+| platform | v1.2.0 asset |
+|---|---|
+| linux, amd64 | [`helm-mutation-test_linux_amd64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_linux_amd64.tar.gz) |
+| linux, arm64 | [`helm-mutation-test_linux_arm64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_linux_arm64.tar.gz) |
+| macOS, amd64 | [`helm-mutation-test_darwin_amd64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_darwin_amd64.tar.gz) |
+| macOS, arm64 | [`helm-mutation-test_darwin_arm64.tar.gz`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_darwin_arm64.tar.gz) |
+| checksums | [`SHA256SUMS`](https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/SHA256SUMS) |
+
+```console
+curl -fsSLO https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/helm-mutation-test_linux_amd64.tar.gz
+curl -fsSLO https://github.com/mmpyro/helm-mutation-test/releases/download/v1.2.0/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS    # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+tar -xzf helm-mutation-test_linux_amd64.tar.gz helm-mutation-test
+```
+
+Older versions are on the [releases page](https://github.com/mmpyro/helm-mutation-test/releases).
 
 Either way the chart needs `helm-unittest`-style test suites. Tested against helm-unittest v1.0.3.
 

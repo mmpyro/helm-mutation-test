@@ -127,6 +127,10 @@ Pick how you run Helm. The choice is remembered across the docs.
 Prebuilt, checksum-verified binaries cover linux and macOS on amd64 and arm64; anywhere else the
 plugin builds from source and needs Go.
 
+The latest release is [**v1.2.0**](https://github.com/mmpyro/helm-mutation-test/releases/tag/v1.2.0),
+which adds the [`pipe-drop`](mutators.md#pipe-drop) mutator. Pin it with `--version v1.2.0`, or
+[download the binaries directly](getting-started.md#1-install).
+
 ## Guides
 
 | Guide | Read it when you want to… |
