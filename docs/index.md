@@ -10,7 +10,7 @@ hide:
 
 # helm-mutation-test
 
-**Mutation testing for Helm charts.** Measures how much your
+**Mutation testing for Helm charts.** It measures how much your
 [helm-unittest](https://github.com/helm-unittest/helm-unittest) suites actually assert.
 
 [Get started](getting-started.md){ .md-button .md-button--primary }
@@ -19,10 +19,10 @@ hide:
 
 </div>
 
-`helm unittest -t XUnit -o '/Users/mmarszalek/playground/helm-mutation-test/reports/.heatmap-bash.xml'` tells you whether your chart tests **pass**. It cannot tell you whether they are
-**worth anything**. This plugin breaks the chart on purpose — one small change at a time — and
-re-runs your existing suites against each one. A change that no test objects to is a **survived
-mutant**: a precise, actionable pointer at a missing assertion.
+`helm unittest` tells you whether your chart tests **pass**. It cannot tell you whether they are
+**worth anything**. This plugin breaks the chart on purpose, one small change at a time. After each
+change, it runs your existing suites again. A change that no test objects to is a **survived
+mutant**. It points at one specific missing assertion.
 
 ```sh
 helm mutation-test ./my-chart                                   # score the chart's own suites
@@ -33,7 +33,7 @@ helm mutation-test ./my-chart --since origin/main               # only what the 
 ## One chart, two green suites
 
 `testdata/charts/sample` ships two suites over the same templates. Both pass, and `helm unittest`
-reports them as equally green. The same 472 mutants, run against each:
+reports them as equally green. Here are the same 472 mutants, run against each suite:
 
 | suite | killed | survived | equivalent | no-coverage | invalid | score |
 |---|---:|---:|---:|---:|---:|---:|
@@ -50,8 +50,8 @@ Run `make demo` to reproduce both. The walk-through is in [Getting started](gett
 
     ---
 
-    `killed / (killed + survived)`. Everything else — no coverage, invalid, timeouts, capped
-    mutants — is excluded *and named* in every report.
+    The score is `killed / (killed + survived)`. Every report excludes everything else (no
+    coverage, invalid, timeouts, capped mutants) *and names it*.
 
     [:octicons-arrow-right-24: The mutation score](concepts.md#the-mutation-score)
 
@@ -59,8 +59,8 @@ Run `make demo` to reproduce both. The walk-through is in [Getting started](gett
 
     ---
 
-    Survivors that provably cannot change any rendered manifest leave the denominator — and only
-    on proof, never on a guess.
+    A survivor that provably cannot change any rendered manifest leaves the denominator. It
+    leaves only on proof, never on a guess.
 
     [:octicons-arrow-right-24: Equivalent mutants](concepts.md#equivalent-mutants)
 
@@ -77,8 +77,8 @@ Run `make demo` to reproduce both. The walk-through is in [Getting started](gett
 
     ---
 
-    Score only the mutants a branch could have moved, falling back to a full run — saying why —
-    when a change cannot be attributed.
+    Score only the mutants that a branch could have moved. When a change cannot be attributed,
+    the tool falls back to a full run and says why.
 
     [:octicons-arrow-right-24: `--since`](cli-reference.md#--since)
 
@@ -86,7 +86,7 @@ Run `make demo` to reproduce both. The walk-through is in [Getting started](gett
 
     ---
 
-    Shards partition exactly the unsharded selection; `merge` refuses an incomplete set before it
+    Shards partition exactly the unsharded selection. `merge` refuses an incomplete set before it
     grades.
 
     [:octicons-arrow-right-24: Sharding](cli-reference.md#--shard-index---shard-count)
@@ -103,7 +103,7 @@ Run `make demo` to reproduce both. The walk-through is in [Getting started](gett
 
 ## Install
 
-Pick how you run Helm. The choice is remembered across the docs.
+Pick how you run Helm. The docs remember your choice on every page.
 
 === "Helm 4"
 
@@ -124,8 +124,8 @@ Pick how you run Helm. The choice is remembered across the docs.
     make install    # builds bin/helm-mutation-test and links this tree as a Helm plugin
     ```
 
-Prebuilt, checksum-verified binaries cover linux and macOS on amd64 and arm64; anywhere else the
-plugin builds from source and needs Go.
+Prebuilt, checksum-verified binaries cover linux and macOS on amd64 and arm64. On any other
+platform, the plugin builds from source and needs Go.
 
 The latest release is [**v1.2.0**](https://github.com/mmpyro/helm-mutation-test/releases/tag/v1.2.0),
 which adds the [`pipe-drop`](mutators.md#pipe-drop) mutator. Pin it with `--version v1.2.0`, or
