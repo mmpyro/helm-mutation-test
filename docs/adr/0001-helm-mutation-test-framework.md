@@ -9,18 +9,18 @@
 
 ## Context
 
-Helm chart developers use `helm-unittest` to verify that their Go templates (`text/template`) and `values.yaml` generate expected Kubernetes resource manifests. However, traditional unit test suites can easily pass 100% of their test cases while failing to assert critical configuration details (e.g., ports, environment variables, ingress annotations, or replica counts).
+Helm chart developers use `helm-unittest` to check that their Go templates (`text/template`) and `values.yaml` generate the expected Kubernetes resource manifests. A unit test suite can pass 100% of its test cases and still assert nothing about important configuration details. Examples are ports, environment variables, ingress annotations and replica counts.
 
-Mutation testing evaluates unit test suite quality by systematically introducing small artificial defects ("mutants") into source files and checking whether the unit test suite catches (kills) them. Prior to this framework, no automated mutation testing tool existed specifically designed for Helm charts and `helm-unittest`.
+Mutation testing measures the quality of a unit test suite. It puts small artificial defects ("mutants") into the source files, one at a time. Then it checks whether the suite catches (kills) each one. Before this framework, no automated mutation testing tool existed for Helm charts and `helm-unittest`.
 
-Key technical challenges in building a Helm mutation testing tool:
-1. **Whitespace & Trim Markers:** Helm template parsing depends on whitespace-sensitive trim markers (`{{-` and `-}}`). Naive AST pretty-printing destroys formatting and trim semantics.
-2. **Global State & Concurrency in `helm-unittest`:** `helm-unittest` mutates Helm's package-level global variables (such as `chartutil.DefaultCapabilities`) during test execution, causing severe data races and cross-test pollution when executed concurrently in Go goroutines.
-3. **AST Quirks:** Go's `text/template/parse` AST has non-obvious quirks (e.g. `FieldNode.Position()` offset shifts, typed-nil `ElseList` on `IfNode` without `else`).
+A Helm mutation testing tool must solve three technical problems:
+1. **Whitespace & Trim Markers:** Helm template parsing depends on trim markers (`{{-` and `-}}`), which are sensitive to whitespace. A simple AST pretty-printer destroys the formatting and changes what the trim markers do.
+2. **Global State & Concurrency in `helm-unittest`:** During test execution, `helm-unittest` changes package-level global variables in Helm, such as `chartutil.DefaultCapabilities`. When tests run concurrently in Go goroutines, this causes serious data races, and one test's state leaks into another.
+3. **AST Quirks:** The `text/template/parse` AST in Go has quirks that are not obvious. For example, `FieldNode.Position()` gives a shifted offset, and an `IfNode` without `else` has a typed-nil `ElseList`.
 
 ## Decision
 
-We designed and built `helm-mutation-test`, a CLI tool and Helm plugin that parses Helm charts, generates deterministic mutations, executes `helm-unittest` suites against mutated charts, and reports test suite coverage and quality.
+We designed and built `helm-mutation-test`, a CLI tool and Helm plugin. It parses Helm charts and generates deterministic mutations. It runs the `helm-unittest` suites against the mutated charts. Then it reports the coverage and quality of the test suites.
 
 ```
 discover → baseline gate → coverage indexing → candidate generation → worker subprocess execution → classification → reporting
@@ -30,39 +30,39 @@ discover → baseline gate → coverage indexing → candidate generation → wo
 
 | Component / Layer | Choice / Design | Rationale |
 |---|---|---|
-| **Source Mutation (`internal/source`)** | Parse with AST, apply via byte-range edits | Parses files using Go's `text/template/parse` and `gopkg.in/yaml.v3` AST to accurately identify target nodes and spans, but applies modifications as byte-range replacements directly on original source bytes. This preserves all trim markers (`{{- ... -}}`), comments, and raw formatting. |
-| **Worker Subprocesses (`internal/runner/worker.go`)** | Long-lived worker subprocesses over IPC | `helm-unittest` mutates global state (`chartutil.DefaultCapabilities`) during execution. Running tests in worker subprocesses isolates global state across concurrent workers while avoiding worker startup overhead per mutant via streaming IPC. |
-| **Workspace Isolation (`internal/workspace`)** | Isolated temp directory per worker | Each worker process operates on an isolated directory copy of the chart under test, preventing write collisions and template state contamination. |
-| **`helm-unittest` Seam (`internal/runner/unittest.go`)** | Invoke `TestSuite.RunV3` directly | Uses `TestSuite.RunV3` instead of high-level CLI wrappers to retrieve the detailed test assertion tree. This enables attributing kills to specific assertions and distinguishing failed assertions (`Killed`) from template render errors (`Invalid`). |
-| **Baseline Gate (`internal/runner/baseline.go`)** | mandatory pre-flight baseline check | Before mutating, runs tests on the unmutated chart. If baseline tests fail, execution aborts immediately with exit code 2, preventing false-positive kills from a broken baseline. |
-| **Coverage Indexing (`internal/coverage`)** | Pre-compute template-to-suite mapping | Maps each template file to the test suite files that explicitly reference it. Mutants are executed only against covering suites, drastically reducing execution time. |
-| **Mutator Registry (`internal/mutator`)** | Extensible registry of AST mutators | Implements eight core initial mutators (`bool-flip`, `comparison-swap`, `cond-negate`, `default-drop`, `num-literal`, `required-drop`, `str-literal`, `yaml-key-delete`). Each mutator includes guard rules to minimize `Invalid` mutants (mutants that fail at render time and grade nothing). |
-| **Classification & Scoring (`internal/model`, `internal/runner/classify.go`)** | Standardized statuses and score formula | Classifies mutants into `Killed`, `Survived`, `NoCoverage`, `Invalid`, and `Timeout`. Score is calculated strictly as `Score = Killed / (Killed + Survived) * 100%`. Excluded statuses (`NoCoverage`, `Invalid`, `Capped`) do not depress the denominator. |
-| **Multi-Format Reporting (`internal/report`)** | Pure rendering functions over `model.Run` | Supports Console (colored unified diffs), JSON (canonical representation), HTML (Stryker `mutation-testing-elements` schema with offline fallback), Markdown (`GITHUB_STEP_SUMMARY`), and JUnit XML. Exclusions are explicitly named across all formats. |
+| **Source Mutation (`internal/source`)** | Parse with AST, apply via byte-range edits | The tool parses files with the `text/template/parse` and `gopkg.in/yaml.v3` ASTs to find the exact target nodes and spans. It applies each change as a byte-range replacement on the original source bytes. This keeps all trim markers (`{{- ... -}}`), comments and raw formatting. |
+| **Worker Subprocesses (`internal/runner/worker.go`)** | Long-lived worker subprocesses over IPC | `helm-unittest` changes global state (`chartutil.DefaultCapabilities`) during execution. Worker subprocesses keep this global state separate for each concurrent worker. Streaming IPC removes the cost of starting a worker for each mutant. |
+| **Workspace Isolation (`internal/workspace`)** | Isolated temp directory per worker | Each worker process uses its own copy of the chart directory. This prevents write collisions, and one worker cannot contaminate the template state of another. |
+| **`helm-unittest` Seam (`internal/runner/unittest.go`)** | Invoke `TestSuite.RunV3` directly | The tool calls `TestSuite.RunV3`, not the high-level CLI wrappers, so it gets the full tree of test assertions. With this tree, the tool can attribute a kill to a specific assertion. It can also tell a failed assertion (`Killed`) from a template render error (`Invalid`). |
+| **Baseline Gate (`internal/runner/baseline.go`)** | mandatory pre-flight baseline check | Before it mutates anything, the tool runs the tests on the unmutated chart. If a baseline test fails, execution stops immediately with exit code 2. A broken baseline would otherwise produce false-positive kills. |
+| **Coverage Indexing (`internal/coverage`)** | Pre-compute template-to-suite mapping | The index maps each template file to the test suite files that reference it explicitly. The tool runs a mutant only against the suites that cover it, which cuts execution time by a large amount. |
+| **Mutator Registry (`internal/mutator`)** | Extensible registry of AST mutators | The first version has eight core mutators (`bool-flip`, `comparison-swap`, `cond-negate`, `default-drop`, `num-literal`, `required-drop`, `str-literal`, `yaml-key-delete`). Each mutator has guard rules that keep the number of `Invalid` mutants low. An `Invalid` mutant fails at render time and grades nothing. |
+| **Classification & Scoring (`internal/model`, `internal/runner/classify.go`)** | Standardized statuses and score formula | The tool classifies each mutant as `Killed`, `Survived`, `NoCoverage`, `Invalid` or `Timeout`. The score formula is strictly `Score = Killed / (Killed + Survived) * 100%`. The excluded statuses (`NoCoverage`, `Invalid`, `Capped`) do not depress the denominator. |
+| **Multi-Format Reporting (`internal/report`)** | Pure rendering functions over `model.Run` | The supported formats are Console (colored unified diffs), JSON (the canonical form), HTML (the Stryker `mutation-testing-elements` schema, with an offline fallback), Markdown (`GITHUB_STEP_SUMMARY`) and JUnit XML. All formats name the exclusions explicitly. |
 
 ### Source AST Handling Quirks
 
-The `internal/source` package explicitly handles two critical `text/template/parse` quirks:
-- `FieldNode.Position()` points past the field's leading dot/identifier rather than its start offset. `CommandArgSpan` guards against this to prevent shifted byte replacement spans.
-- `IfNode` without an `else` branch contains a typed-nil `ElseList` pointer, which standard nil checks miss and would cause nil-pointer dereference panics during AST traversal.
+The `internal/source` package handles two important `text/template/parse` quirks explicitly:
+- `FieldNode.Position()` points past the leading dot or identifier of the field, not to its start offset. `CommandArgSpan` guards against this, so the byte replacement spans do not shift.
+- An `IfNode` without an `else` branch has a typed-nil `ElseList` pointer. A standard nil check misses it, and the AST traversal then panics with a nil-pointer dereference.
 
 ## Consequences
 
 ### Positive
 
-- **Deterministic & Format-Preserving Mutations:** Byte-range edits on raw source preserve Helm trim markers and formatting without template corruption.
-- **Race-Free Parallelism:** Subprocess worker architecture bypasses `helm-unittest` global state pollution and enables safe `-p` parallel execution.
-- **Accurate Fault Attribution:** Direct integration with `TestSuite.RunV3` distinguishes assertion failures (`Killed`) from parse/render failures (`Invalid`).
-- **Performance:** Coverage indexing ensures mutants execute only against relevant test suites rather than running all test suites for every mutant.
-- **Standardized Reporting:** Supports native CI integration (`GITHUB_STEP_SUMMARY`, JUnit XML) and standard mutation web UI standards (Stryker format).
+- Deterministic & Format-Preserving Mutations: Byte-range edits on the raw source keep the Helm trim markers and the formatting. They do not corrupt the template.
+- Race-Free Parallelism: Worker subprocesses avoid the global state pollution in `helm-unittest`. This makes parallel execution with `-p` safe.
+- Accurate Fault Attribution: The tool calls `TestSuite.RunV3` directly, so it can tell assertion failures (`Killed`) from parse or render failures (`Invalid`).
+- Performance: Because of the coverage index, the tool runs each mutant only against the relevant test suites. It does not run all test suites for every mutant.
+- Standardized Reporting: The tool supports native CI integration (`GITHUB_STEP_SUMMARY`, JUnit XML) and the standard format for mutation web UIs (Stryker format).
 
 ### Negative / Risks
 
-- Worker subprocesses introduce IPC overhead and process management complexity compared to pure goroutines.
-- Dependency on `helm-unittest` internals requires matching `go.mod` replace directives (`yaml-jsonpath`).
+- Worker subprocesses add IPC overhead. Process management is also more complex than with pure goroutines.
+- Because the tool depends on `helm-unittest` internals, it needs matching `go.mod` replace directives (`yaml-jsonpath`).
 
 ## Out of Scope (Initial Version)
 
-- In-process execution of `helm-unittest` for parallel workers (blocked by `helm-unittest` global state mutations).
+- In-process execution of `helm-unittest` for parallel workers. The global state mutations in `helm-unittest` block this.
 - Equivalent mutant detection (addressed in ADR-0002).
 - `range` loop mutations (addressed in ADR-0003).

@@ -1,7 +1,7 @@
 # Report formats
 
-Six formats, selected with `--report` in any combination. Every one is a pure function of the run
-model, so they always agree with each other.
+There are six formats. Select any combination of them with `--report`. Each format is a pure
+function of the run model, so the formats always agree with each other.
 
 ```console
 helm mutation-test ./my-chart --report console,json,markdown,junit,html,sarif --report-dir ./mutation
@@ -10,40 +10,42 @@ helm mutation-test ./my-chart --report console,json,markdown,junit,html,sarif --
 | format | destination | filename | use it for |
 |---|---|---|---|
 | [`console`](#console) *(default)* | stdout | — | Reading the result yourself, right now |
-| [`json`](#json) | file | `mutation-report.json` | Building something on top; the canonical model |
+| [`json`](#json) | file | `mutation-report.json` | Building something on top (it is the canonical model) |
 | [`markdown`](#markdown) | file | `mutation-report.md` | `$GITHUB_STEP_SUMMARY`, PR comments |
 | [`junit`](#junit) | file | `mutation-report.junit.xml` | CI systems that already display test results |
 | [`sarif`](#sarif) | file | `mutation-report.sarif` | GitHub code scanning, inline PR annotations, the editor's Problems panel |
 | [`html`](#html) | file | `mutation-report.html` **+** `mutation-report.stryker.json` | A publishable artifact with annotated source |
 
-`--report-dir` (default `.helm-mutation-test`) is created only when a non-console format is requested.
+The tool creates `--report-dir` (default `.helm-mutation-test`) only when you request a format other
+than `console`.
 
-**Every format names what it excluded.** The score, the non-scoring counts, and any `--max-mutants`
-truncation appear in all six. That is a deliberate invariant: a report that showed only the score
-could let a truncated or partially-covered run read as full coverage. See
+**Every format names what it excluded.** All six formats show the score, the counts that are not
+scored, and any `--max-mutants` truncation. This rule is deliberate. A report that showed only the
+score could make a truncated or partly covered run look like full coverage. See
 [concepts.md](concepts.md#truncation-is-always-reported).
 
 **Every format also states when the equivalence check did not run.** With `--no-equivalence-check`,
-every survivor stays `Survived` exactly as before this feature existed — see
-[concepts.md](concepts.md#equivalent-mutants) — and each format says so explicitly, the same way it
-says so for a `--max-mutants` truncation, rather than letting a report silently look like a run where
-none of the survivors were equivalent.
+every survivor stays `Survived`, exactly as before this feature existed (see
+[concepts.md](concepts.md#equivalent-mutants)). Each format states this explicitly, the same way it
+states a `--max-mutants` truncation. Without that statement, a report could silently look like a run
+where none of the survivors were equivalent.
 
-All samples below are real output from `testdata/charts/sample` (472 mutants), and are marked where
-truncated.
+All samples on this page are real output from `testdata/charts/sample` (472 mutants). Truncated
+samples are marked.
 
 ---
 
 ## `console`
 
-The human-facing summary, and the default. Ordered deliberately: the score first, then where the gaps
-are, then each individual survivor as a diff at a `file:line` you can go and fix.
+This is the summary for people to read, and it is the default format. The order is deliberate. First
+comes the score, then where the gaps are, then each survivor as a diff at a `file:line` that you can
+fix.
 
-Sections, in order: header, score, `By mutator`, `By file`, `SURVIVED`, `NO COVERAGE`, `Equivalent`,
-`INVALID`, `PARTIALLY ANALYSED`, footer. Empty sections are omitted entirely.
+The sections, in order, are: header, score, `By mutator`, `By file`, `SURVIVED`, `NO COVERAGE`,
+`Equivalent`, `INVALID`, `PARTIALLY ANALYSED`, footer. The tool omits empty sections entirely.
 
-**Use it for** interactive work. It is the only format that gets the survivor list *and* both
-breakdown tables *and* the coverage note on every survivor.
+**Use it for** interactive work. It is the only format that shows the survivor list, both breakdown
+tables and the coverage note on every survivor.
 
 ### Sample — the weak suite (truncated)
 
@@ -118,37 +120,39 @@ Mutation testing sample  (1 suite, 4 tests, baseline 3ms)
   472 mutants in 551ms
 ```
 
-*(Three of the 255 survivor blocks shown and the `Equivalent` list abridged, non-contiguous; the real
-output prints all of them.)*
+*(The sample shows three of the 255 survivor blocks and an abridged, non-contiguous `Equivalent`
+list. The real output prints all of them.)*
 
 ### How to read it
 
-- **The bar and the score are coloured by band**: green at ≥ 80%, yellow at ≥ 50%, red below.
-- **`not scored:`** lists every excluded status with its count. It is only printed when something was
-  excluded.
-- **A `--no-equivalence-check` run prints an extra line** — `equivalence check skipped
-  (--no-equivalence-check): some survivors may be unkillable` — right under `not scored:`, so a report
-  never looks like a run where the check found nothing.
+- **The bar and the score have one colour per band**: green at ≥ 80%, yellow at ≥ 50%, red below.
+- **`not scored:`** lists every excluded status with its count. The tool prints it only when the run
+  excluded something.
+- **A `--no-equivalence-check` run prints an extra line** directly under `not scored:`:
+  `equivalence check skipped
+  (--no-equivalence-check): some survivors may be unkillable`. Thus a report never looks like a run
+  where the check found nothing.
 - **Breakdowns are sorted by ascending score**, so the most under-tested mutator and file are at the
-  top. A row with nothing scored shows `—  not scored` rather than a meaningless `0.0%`, which is what
-  the five uncovered templates show above.
+  top. A row with nothing scored shows `—  not scored`, not a meaningless `0.0%`. The five uncovered
+  templates in the sample show this.
 - **Long file names are truncated from the left** with a leading `…`, as
-  `…plates/poddisruptionbudget.yaml` shows — the tail is the useful part.
-- **Survivors are grouped by file** in sorted order, so you fix one file at a time.
-- **A deletion has no "after" text**, so it renders as `(line removed)` or `(N lines removed)` — only
-  the first deleted line is shown.
+  `…plates/poddisruptionbudget.yaml` shows. The end of the path is the useful part.
+- **The tool groups survivors by file**, in sorted order, so you can fix one file at a time.
+- **A deletion has no "after" text**, so it renders as `(line removed)` or `(N lines removed)`. The
+  diff shows only the first deleted line.
 - **The note under each diff says what actually ran**: `ran 4 tests in tests/weak_test.yaml — all
-  passed`, or `ran N tests across M suite files — all passed` when several suite files covered it.
-  That distinguishes a genuine survivor from an unexercised one.
-- **`NO COVERAGE` is counted per file**, because "no suite renders this template" is a per-file
-  finding; listing all 173 mutants would bury it.
+  passed`, or `ran N tests across M suite files — all passed` when several suite files covered the
+  mutant. This note separates a real survivor from one that no test exercised.
+- **`NO COVERAGE` has one count per file**, because "no suite renders this template" is a finding
+  about a file. A list of all 173 mutants would hide that finding.
 - **`Equivalent` lists every mutant the check reclassified**, each at its `file:line:column`. Unlike
-  `SURVIVED` these are not diffed, since there is nothing left to fix: the detail is that no assertion
-  ever could have caught them. A mutator whose every survivor turns out equivalent — `pipe-drop` and
-  `required-drop` above — shows `—  not scored` in the breakdowns rather than a `0.0%` that would read as a weak
-  suite.
-- **`PARTIALLY ANALYSED`** appears when a file could not be fully analysed — most often a template
-  that Go's parser rejected, in which case the line-based mutators still ran but the AST ones did not.
+  `SURVIVED` entries, these have no diff, because there is nothing to fix. No assertion could ever
+  have caught them. For some mutators, every survivor turns out equivalent (`pipe-drop` and
+  `required-drop` in the sample). Their breakdown rows show `—  not scored`, not a `0.0%` that would
+  look like a weak suite.
+- **`PARTIALLY ANALYSED`** appears when the tool could not fully analyse a file. Most often this is a
+  template that Go's parser rejected. In that case the line-based mutators still ran, but the AST
+  mutators did not.
 
 ### The same chart, the strong suite
 
@@ -195,19 +199,23 @@ Mutation testing sample  (7 suites, 43 tests, baseline 44ms)
   472 mutants in 2.5s
 ```
 
-*(The `Equivalent` list abridged; the real output prints all 26.)*
+*(The `Equivalent` list is abridged. The real output prints all 26.)*
 
-There is no `SURVIVED` section at all here — it is omitted because the count is zero. Every mutant
-this suite could possibly kill, it killed. Of the remaining 26, 21 are the two patterns walked through in
-[equivalent mutants](concepts.md#equivalent-mutants): `configmap.yaml:6` is an `nindent 4 → 5` that
-reindents a block without changing the parsed data, and `values.yaml:83` deletes `debug: false`, which
-leaves the value nil and Go templates treat nil exactly like `false`. The other 5 are `pipe-drop`
-removing a `| quote` from a value that is already a plain string, such as `_helpers.tpl:15`'s
-`.Chart.AppVersion`: YAML parses it to the same string with or without the quotes.
+This output has no `SURVIVED` section, because the count is zero. The suite killed every mutant that it
+could kill. Of the remaining 26, 21 match the two patterns in
+[equivalent mutants](concepts.md#equivalent-mutants):
 
-Each `Equivalent` entry carries the evidence in its `detail` field in the JSON report — for example
-`identical under 43 test-job value sets; span proven executed` — so a reader does not have to take the
-verdict on faith; see [concepts.md](concepts.md#the-parsed-render-comparison) for what that evidence
+- `configmap.yaml:6` is an `nindent 4 → 5`. It reindents a block but does not change the parsed data.
+- `values.yaml:83` deletes `debug: false`. This leaves the value nil, and Go templates treat nil
+  exactly like `false`.
+
+The other 5 are `pipe-drop` mutants. Each one removes a `| quote` from a value that is already a plain
+string, such as `.Chart.AppVersion` in `_helpers.tpl:15`. YAML parses that value to the same string
+with or without the quotes.
+
+Each `Equivalent` entry carries its evidence in the `detail` field of the JSON report, for example
+`identical under 43 test-job value sets; span proven executed`. Thus a reader does not have to take the
+verdict on faith. See [concepts.md](concepts.md#the-parsed-render-comparison) for what that evidence
 means and how to check it by hand.
 
 With a `--threshold`, the footer adds an explicit verdict line:
@@ -217,31 +225,32 @@ With a `--threshold`, the footer adds an explicit verdict line:
   score 100.0% meets the 70.0% threshold
 ```
 
-Colour is auto-detected from whether stdout is a terminal; force it with `--color`, suppress it with
+The tool turns colour on when stdout is a terminal. Force colour with `--color`, or turn it off with
 `--no-color`.
 
 ---
 
 ## `json`
 
-The canonical machine-readable report: the full model, every mutant, with kill attribution. The other
-file formats are summaries — this is the one to parse if you want to build something on top.
+This is the canonical machine-readable report. It holds the full model and every mutant, with kill
+attribution. The other file formats are summaries. Parse this one if you want to build something on
+top.
 
-**Use it for** custom dashboards, score trends over time, scripting ("which survivors are new since
-`main`?"), or extracting the exact assertion that killed a given mutation.
+**Use it for** custom dashboards, score trends over time, scripts ("which survivors are new since
+`main`?"), or to find the exact assertion that killed a given mutation.
 
-The wire shape is `"schema": "helm-mutation-test/v1"` and is deliberately a separate type from the
-internal model, so refactors do not silently change the published format.
+The wire shape is `"schema": "helm-mutation-test/v1"`. It is deliberately a separate type from the
+internal model, so a refactor does not silently change the published format.
 
-It is also the input to `helm mutation-test merge`. A shard's report carries one extra top-level
-object, absent from unsharded and merged reports, and its `score` covers that slice only:
+It is also the input to `helm mutation-test merge`. A shard's report has one extra top-level object
+that unsharded and merged reports do not have. Its `score` covers that slice only:
 
 ```json
 "shard": { "index": 2, "count": 4, "otherShards": 60, "seed": 1 }
 ```
 
-A shard writes it as `mutation-report.shard-K-of-N.json`, so shards sharing a directory do not
-overwrite each other.
+A shard writes its report as `mutation-report.shard-K-of-N.json`, so shards that share a directory do
+not overwrite each other.
 
 ### Top level (real, from the strong-suite run)
 
@@ -296,27 +305,27 @@ overwrite each other.
 
 1.  `killed / (killed + survived)` as a percentage, rounded to two places. Nothing else is in the
     denominator.
-2.  Reflects `--threshold`; with no threshold it is `true`. A shard refuses `--threshold`: only
-    `merge` grades.
-3.  One count per status. Only `killed` and `survived` grade the suite; every other status is
-    excluded from `score` and named here.
+2.  Reflects `--threshold`. With no threshold it is `true`. A shard refuses `--threshold`, because
+    only `merge` grades.
+3.  One count per status. Only `killed` and `survived` grade the suite. `score` excludes every
+    other status, and this object names each one.
 4.  `false` when `--no-equivalence-check` skipped the pass, so `tally.equivalent == 0` is not
     ambiguous.
-5.  Survivors the pass ran over but could not decide. Each one's `detail` says why.
+5.  Survivors that the pass ran over but could not decide. Each one's `detail` says why.
 6.  The count **before** any `--max-mutants` cap or `--since` narrowing.
-7.  How many mutants `--max-mutants` dropped. Never silent: every format names it.
+7.  How many mutants `--max-mutants` dropped. This is never silent. Every format names it.
 8.  One entry per `suite:` document, not per suite file.
 
-*(Suite test lists, `byMutator`, `byFile` and `mutants` truncated above; the real file is complete.
-Note seven suites all live in one suite *file* — `suites` is one entry per `suite:` document. Every
-`byMutator`/`byFile` row ties at 100.0% here, because the equivalence pass has already removed every
-survivor these breakdowns could otherwise have shown.)*
+*(The suite test lists, `byMutator`, `byFile` and `mutants` are truncated above. The real file is
+complete. Note that all seven suites live in one suite *file*: `suites` has one entry per `suite:`
+document. Every `byMutator`/`byFile` row ties at 100.0% here. The reason is that the equivalence pass
+already removed every survivor that these breakdowns could otherwise show.)*
 
 Field notes:
 
-- `score` is rounded to two places. `passed` reflects `--threshold`; with no threshold it is `true`.
-- `generated` is the count **before** any `--max-mutants` cap or `--since` narrowing; `capped` is how
-  many the cap dropped. `generated - incremental.mutantsSkipped - capped == len(mutants)`
+- `score` is rounded to two places. `passed` reflects `--threshold`. With no threshold it is `true`.
+- `generated` is the count **before** any `--max-mutants` cap or `--since` narrowing. `capped` is how
+  many mutants the cap dropped. `generated - incremental.mutantsSkipped - capped == len(mutants)`
   (`mutantsSkipped` is 0 without `--since`).
 - `incremental` is present only for a `--since` run:
 
@@ -332,19 +341,20 @@ Field notes:
   }
   ```
 
-  `filesChanged` is every chart-relative path in the diff; `filesInspected`/`filesSkipped` count
-  mutable files; `fullRunReason` (omitted when empty) names the change that forced a full run, in
-  which case `mutantsSkipped` is 0. Every other format prints the same facts as one line, and
-  JUnit as a prepended `--since` skipped testcase.
+  `filesChanged` is every chart-relative path in the diff. `filesInspected`/`filesSkipped` count
+  mutable files. `fullRunReason` (omitted when empty) names the change that forced a full run. In
+  that case `mutantsSkipped` is 0. The other formats print the same facts as one line. JUnit prints
+  them as a prepended `--since` skipped testcase.
 - `byMutator` and `byFile` are sorted ascending by score.
-- `equivalenceChecked` distinguishes a run where the pass found no equivalent mutants from one where
-  `--no-equivalence-check` skipped it entirely — `tally.equivalent == 0` is ambiguous on its own.
-- `equivalenceUnchecked` counts survivors the pass ran over but could not decide: an unloadable
-  chart, a covering suite it had to skip, a span it could not probe. `equivalenceChecked: true` with
-  a non-zero `equivalenceUnchecked` means the check ran and proved nothing about that many
-  survivors; each one's `detail` says why.
-- `skippedFiles` is present only when a file could not be fully analysed.
-- `timing` is in milliseconds; each mutant additionally carries `durationNanos`.
+- `equivalenceChecked` separates a run where the pass found no equivalent mutants from a run where
+  `--no-equivalence-check` skipped the pass entirely. On its own, `tally.equivalent == 0` is
+  ambiguous.
+- `equivalenceUnchecked` counts survivors that the pass ran over but could not decide. The cause can
+  be an unloadable chart, a covering suite that the pass had to skip, or a span that it could not
+  probe. If `equivalenceChecked` is `true` and `equivalenceUnchecked` is not zero, the check ran but
+  proved nothing about that many survivors. Each one's `detail` says why.
+- `skippedFiles` is present only when the tool could not fully analyse a file.
+- `timing` is in milliseconds. Each mutant also has its own `durationNanos`.
 
 ### A killed mutant, verbatim
 
@@ -378,9 +388,9 @@ Field notes:
 }
 ```
 
-`failInfo` names the exact JSONPath the assertion was checking, which is usually enough to see why the
-mutation was caught. `killedBy` holds a single entry under the default `--kill-attribution=first`, and
-every killing assertion under `--kill-attribution=all`.
+`failInfo` names the exact JSONPath that the assertion checked. This is usually enough to see why the
+assertion caught the mutation. Under the default `--kill-attribution=first`, `killedBy` holds a single
+entry. Under `--kill-attribution=all`, it holds every assertion that killed the mutant.
 
 ### An equivalent mutant, verbatim
 
@@ -405,11 +415,14 @@ every killing assertion under `--kill-attribution=all`.
 }
 ```
 
-There is no `killedBy` — nothing killed it — but `detail` carries the equivalence pass's own evidence:
-how many test-job value sets the mutant and the original rendered identically under, and that the
-execution probe proved the span was actually reached by at least one of them. `testsRun` is unrelated
-and left over from evaluation: the 9 tests that ran the *worker* pass before the mutant was known to
-survive, not the 43 render contexts the *equivalence* pass then checked against.
+This mutant has no `killedBy`, because nothing killed it. Instead, `detail` carries the evidence from
+the equivalence pass. It gives the number of test-job value sets under which the mutant and the
+original rendered identically. It also says that the execution probe proved that at least one of
+those value sets actually reached the span.
+
+`testsRun` is unrelated and is left over from evaluation. It counts the 9 tests that ran in the
+*worker* pass, before the tool knew that the mutant survived. It does not count the 43 render contexts
+that the *equivalence* pass then checked.
 
 ### An invalid mutant, verbatim
 
@@ -433,9 +446,9 @@ survive, not the 43 render contexts the *equivalence* pass then checked against.
 }
 ```
 
-`detail` carries the render error for `Invalid`, and the tool error for `Error`. A `num-literal`
-invalid looks different — `"detail": "yaml: line 22: did not find expected key"` — because collapsing
-an `nindent` width breaks the YAML rather than the template.
+For `Invalid`, `detail` carries the render error. For `Error`, it carries the tool error. An invalid
+`num-literal` mutant looks different: `"detail": "yaml: line 22: did not find expected key"`. The
+reason is that a collapsed `nindent` width breaks the YAML, not the template.
 
 ### Useful queries
 
@@ -470,7 +483,7 @@ jq '{equivalenceChecked, equivalenceUnchecked}' mutation-report.json
 
 ## `markdown`
 
-A summary sized for a CI job summary or a PR comment.
+This format is a summary sized for a CI job summary or a PR comment.
 
 **Use it for** `$GITHUB_STEP_SUMMARY`, a bot comment, or anywhere a reviewer will read the result
 without opening an artifact.
@@ -483,10 +496,10 @@ without opening an artifact.
     cat ./mutation/mutation-report.md >> "$GITHUB_STEP_SUMMARY"
 ```
 
-The survivor list is wrapped in `<details>` so it does not dominate the page, and is **capped at 40
-entries** with an explicit note when it truncates — GitHub's step summary has a size limit, and a
-silent cut would misrepresent the run. The weak run's 255 survivors do not fit; the strong run has none
-left to show, since its equivalence pass reclassifies every one.
+The survivor list is inside `<details>`, so it does not take over the page. The list is **capped at 40
+entries**, with an explicit note when the tool truncates it. GitHub's step summary has a size limit,
+and a silent cut would misrepresent the run. The 255 survivors of the weak run do not fit. The strong
+run has no survivors to show, because its equivalence pass reclassifies every one.
 
 ### Sample — the strong suite
 
@@ -541,41 +554,41 @@ None — every covered mutation was caught.
 
 Differences from `console`:
 
-- The outcome table hides zero-count non-scoring rows to stay short, but **always** shows `Killed`
-  and `Survived`, and always states `Score counts only killed and survived mutants: N of M`.
+- To stay short, the outcome table hides non-scoring rows with a zero count. But it **always** shows
+  `Killed` and `Survived`, and it always states `Score counts only killed and survived mutants: N of M`.
 - With a `--threshold` set, a `✅ Meets the 70.0% threshold.` or
-  `❌ **Below the 70.0% threshold.**` line appears right under the header.
+  `❌ **Below the 70.0% threshold.**` line appears directly under the header.
 - With `--no-equivalence-check`, a `> The equivalence check was skipped
-  (--no-equivalence-check); some survivors may be unkillable.` line appears right after the outcome
-  table.
+  (--no-equivalence-check); some survivors may be unkillable.` line appears directly after the
+  outcome table.
 - A capped run adds `> ⚠️ --max-mutants ran N of M generated mutants; K were not evaluated.`
-- With no survivors: `### Survived mutants` / `None — every covered mutation was caught.`
-- Templates no suite renders get their own `### Templates no suite renders` section, which for the
-  weak suite lists all five files with their mutant counts.
-- **Unlike `console`, there is no per-mutant `Equivalent` list** — only the Outcome table's count.
-  There is also no per-survivor coverage note; use `console` or `json` for either.
+- With no survivors, the section reads `### Survived mutants` / `None — every covered mutation was caught.`
+- Templates that no suite renders get their own `### Templates no suite renders` section. For the weak
+  suite, this section lists all five files with their mutant counts.
+- **Unlike `console`, this format has no per-mutant `Equivalent` list.** It shows only the count in
+  the Outcome table. It also has no per-survivor coverage note. Use `console` or `json` for either.
 
-The weak run's `Survived mutants` section still shows a capped list of 40 of its 255 survivors, and its
-`Outcome` table's `Equivalent` row reads 24 — see [concepts.md](concepts.md#equivalent-mutants) for what
-distinguishes those 24 from the 255 that remain.
+In the weak run, the `Survived mutants` section still shows a capped list of 40 of its 255 survivors.
+Its `Outcome` table's `Equivalent` row reads 24. See [concepts.md](concepts.md#equivalent-mutants) for
+what separates those 24 from the 255 that remain.
 
 ---
 
 ## `junit`
 
-One `<testcase>` per mutant, so any CI system displays mutation results natively without needing to
-understand mutation testing.
+This format writes one `<testcase>` per mutant. Any CI system then displays mutation results natively,
+and it does not need to understand mutation testing.
 
 **The mapping inverts the usual sense on purpose:**
 
 | status | JUnit |
 |---|---|
-| `Survived` | `<failure type="SurvivedMutant">` — the survivor is the actionable defect, so it is what should turn the job red |
-| `Killed` | a passing testcase — the tests did their job |
-| `NoCoverage`, `Invalid`, `Equivalent`, `Timeout`, `Error` | `<skipped>` with a reason — none of them says anything about assertion quality, and none should fail a build |
+| `Survived` | `<failure type="SurvivedMutant">`. The survivor is the defect you can act on, so it is what should turn the job red. |
+| `Killed` | a passing testcase. The tests did their job. |
+| `NoCoverage`, `Invalid`, `Equivalent`, `Timeout`, `Error` | `<skipped>` with a reason. None of them says anything about assertion quality, and none should fail a build. |
 
-One `<testsuite>` per chart file, in first-appearance order. Each testcase name is
-`MUTATOR at FILE:LINE [ID]`, `classname` is the file, and `time` is that mutant's own duration.
+There is one `<testsuite>` per chart file, in order of first appearance. Each testcase name is
+`MUTATOR at FILE:LINE [ID]`, `classname` is the file, and `time` is the duration of that mutant.
 
 **Use it for** making a weak suite visible in the CI UI you already have, or gating a build without
 `--threshold` (fail on any survivor).
@@ -604,13 +617,13 @@ One `<testsuite>` per chart file, in first-appearance order. Each testcase name 
 </testsuites>
 ```
 
-*(Long attributes wrapped for readability. `_helpers.tpl` has 17 testcases, zero failures and one skip: the
-strong suite kills every mutant in it except a `| quote` drop that cannot change the rendered string. Note there are no `<failure>` elements
-anywhere in this run — the equivalence pass reclassified all 26 of the strong suite's would-be
-survivors, so `failures="0"` across the whole file.)*
+*(Long attributes are wrapped for readability. `_helpers.tpl` has 17 testcases, zero failures and one
+skip. The strong suite kills every mutant in it except a `| quote` drop that cannot change the
+rendered string. This run has no `<failure>` elements anywhere. The equivalence pass reclassified all
+26 of the strong suite's would-be survivors, so `failures="0"` across the whole file.)*
 
-A `<failure>` still looks exactly as it always did; this is real output from the weak suite, which does
-have genuine survivors:
+A `<failure>` still looks exactly as it always did. This is real output from the weak suite, which
+does have real survivors:
 
 ```xml
 <testcase name="yaml-key-delete at templates/deployment.yaml:9 [deployment.yaml:198:yaml-key-delete]"
@@ -629,13 +642,14 @@ Add an assertion that distinguishes the original from the mutation.
 </testcase>
 ```
 
-*(Newlines inside `<failure>` are XML-escaped as `&#xA;` in the real file; expanded above for
+*(The real file escapes newlines inside `<failure>` as `&#xA;`. They are expanded above for
 readability.)*
 
 Each failure body carries the mutator, the exact `file:line:column`, the diff, what ran, and the
 one-line instruction `Add an assertion that distinguishes the original from the mutation.`
 
-Skipped reasons are specific, so a skip is never mysterious. These are real, from the weak-suite run:
+Skipped reasons are specific, so a skip is never a mystery. These reasons are real, from the
+weak-suite run:
 
 ```xml
 <skipped message="no suite renders templates/configmap.yaml, so this mutation was never run"/>
@@ -645,10 +659,10 @@ Skipped reasons are specific, so a skip is never mysterious. These are real, fro
 ```
 
 `Timeout` and `Error` use the same shape (`evaluation timed out: …`, `the tool failed on this
-mutant: …`); the fixture chart produces neither.
+mutant: …`). The fixture chart produces neither.
 
-With `--no-equivalence-check`, a prepended `<testsuite name="--no-equivalence-check">` makes the skip
-visible the same way `--max-mutants` truncation does, below:
+With `--no-equivalence-check`, the tool prepends a `<testsuite name="--no-equivalence-check">`. This
+makes the skip visible, the same way as for the `--max-mutants` truncation further down:
 
 ```xml
 <testsuite name="--no-equivalence-check" tests="1" failures="0" skipped="1" hostname="localhost">
@@ -658,8 +672,7 @@ visible the same way `--max-mutants` truncation does, below:
 </testsuite>
 ```
 
-A truncated run gains one extra `<testsuite>`, so the cap is visible here as it is in every other
-format:
+A truncated run gets one extra `<testsuite>`, so the cap is visible here as in every other format:
 
 ```xml
 <testsuite name="--max-mutants" tests="1" failures="0" skipped="1" hostname="localhost">
@@ -669,8 +682,8 @@ format:
 </testsuite>
 ```
 
-It is prepended to the real testsuites and counted in the top-level `tests` and `skipped`
-attributes, which therefore stay equal to the sum over child suites.
+The tool prepends it to the real testsuites and counts it in the top-level `tests` and `skipped`
+attributes. These attributes therefore stay equal to the sum over the child suites.
 
 ```yaml
 - name: Publish mutation results
@@ -684,23 +697,23 @@ attributes, which therefore stay equal to the sum over child suites.
 
 ## `sarif`
 
-A [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log: the format
-behind GitHub's code-scanning alerts, inline PR annotations, and the Problems panel of any editor
-with a SARIF viewer.
+A [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log. SARIF is
+the format behind GitHub's code-scanning alerts, inline PR annotations, and the Problems panel of any
+editor with a SARIF viewer.
 
-**Use it for** survivors annotated on the template line they mutated, in the PR diff or in the editor,
-without anyone opening the HTML artifact.
+**Use it for** survivors annotated on the template line they mutated, in the PR diff or in the
+editor. Nobody has to open the HTML artifact.
 
-**Every result becomes an alert, so only actionable findings are results:**
+**Every result becomes an alert, so only findings you can act on become results:**
 
 | status | SARIF |
 |---|---|
-| Survived | one `result` per mutant; rule = the mutator ID |
+| Survived | one `result` per mutant, rule = the mutator ID |
 | NoCoverage | one `result` **per file**, rule `no-coverage`, at line 1 |
-| Killed, Invalid, Equivalent, Timeout, Error | no result; counted in the notifications below |
+| Killed, Invalid, Equivalent, Timeout, Error | no result. The notifications further down count them. |
 
-A survivor's `level` is `error` when the run misses `--threshold`, the same condition as exit code
-1, so red annotations line up with a red job. Otherwise it is `warning`. A no-coverage result is
+A survivor's `level` is `error` when the run misses `--threshold`. This is the same condition as exit
+code 1, so red annotations match a red job. Otherwise the level is `warning`. A no-coverage result is
 always `warning`.
 
 The weak run (threshold 70) produces 255 survivor results and 5 no-coverage results:
@@ -723,7 +736,7 @@ The weak run (threshold 70) produces 255 survivor results and 5 no-coverage resu
 }
 ```
 
-**What the results leave out is named in the invocation's `toolExecutionNotifications`:**
+**The invocation's `toolExecutionNotifications` name what the results leave out:**
 
 ```text
 note     mutation score 2.3% (6 killed of 261 scored); excluded from the score: 173 no-coverage, 14 invalid, 24 equivalent, 0 timeout, 0 error
@@ -732,18 +745,18 @@ warning  8 survivors could not be checked for equivalence and may be unkillable;
 ```
 
 A `--max-mutants` cap, a `--no-equivalence-check` run and partially analysed files each add a
-`warning` notification, worded as in JUnit. `runs[0].properties` repeats the numbers: `score`,
-`tally`, `generated`, `capped`, `equivalenceChecked`, `equivalenceUnchecked`, `threshold`.
+`warning` notification, with the same words as in JUnit. `runs[0].properties` repeats the numbers:
+`score`, `tally`, `generated`, `capped`, `equivalenceChecked`, `equivalenceUnchecked`, `threshold`.
 
 **Locations:**
 - `uri` is the chart path as you passed it, joined with the chart-relative file, relative to
-  `%SRCROOT%`. GitHub resolves that against the checkout root, so **run from the repository root with
+  `%SRCROOT%`. GitHub resolves that against the checkout root. So **run from the repository root with
   a relative chart path**. An absolute chart path gives an absolute `file://` URI.
-- Columns count Unicode code points (`columnKind: unicodeCodePoints`), not bytes. Like the Stryker
-  report, the region covers only the mutation's first line.
-- `partialFingerprints` hashes the file, mutator, original and mutated text and the trimmed source
-  line, not the mutant ID. The ID embeds a byte offset, so an edit above a survivor would otherwise
-  close its alert and open an identical new one.
+- Columns count Unicode code points (`columnKind: unicodeCodePoints`), not bytes. As in the Stryker
+  report, the region covers only the first line of the mutation.
+- `partialFingerprints` hashes the file, the mutator, the original and mutated text, and the trimmed
+  source line. It does not hash the mutant ID, because the ID contains a byte offset. With the ID in
+  the hash, an edit above a survivor would close its alert and open an identical new one.
 
 ```yaml
 permissions:
@@ -762,53 +775,57 @@ steps:
 
 ## `html`
 
-A self-contained page, plus the standard-schema JSON alongside it. `--report html` writes **two**
-files:
+This format is a self-contained page, plus the standard-schema JSON next to it. `--report html`
+writes **two** files:
 
-- `mutation-report.html` — 293 KB for the fixture chart
-- `mutation-report.stryker.json` — 288 KB, most of it embedded chart source
+- `mutation-report.html`: 293 KB for the fixture chart
+- `mutation-report.stryker.json`: 288 KB, most of it embedded chart source
 
-**Use it for** a CI artifact somebody will actually open, and for annotated source: seeing each
-mutation highlighted in place in the template it came from.
+**Use it for** a CI artifact that somebody will actually open, and for annotated source. Annotated
+source shows each mutation highlighted in place, in the template it came from.
 
 ### The page
 
-Four sections: `Mutation report — CHART`, `Outcomes`, `Survived mutants`, `Annotated source`.
+The page has four sections: `Mutation report — CHART`, `Outcomes`, `Survived mutants`,
+`Annotated source`.
 
-The big score at the top is banded like the console output (`good` / `okay` / `poor` classes at
-80/50 — the strong run's 100.0% renders as `good`), and the page has a dark-mode stylesheet via
+The big score at the top uses the same bands as the console output: `good` / `okay` / `poor` classes
+at 80/50. The strong run's 100.0% renders as `good`. The page has a dark-mode stylesheet through
 `prefers-color-scheme`.
 
-The `Outcomes` table has a row per status, `Equivalent` included, plus a `Scored` total row stating how
-many of all mutants counted. With `--no-equivalence-check`, an extra warning row states the check did
-not run, the same way an extra row states a `--max-mutants` truncation.
+The `Outcomes` table has a row per status, `Equivalent` included. It also has a `Scored` total row
+that states how many of all mutants counted. With `--no-equivalence-check`, an extra warning row
+states that the check did not run. An extra row states a `--max-mutants` truncation the same way.
 
 `Annotated source` hosts the published
 [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements) web
-component, loaded from jsDelivr, fed the report from an inline `<script type="application/json">`.
+component. The page loads it from jsDelivr and feeds it the report from an inline
+`<script type="application/json">`.
 
-**The plain-HTML summary above it is the point.** An artifact opened out of a CI run is very often
-opened with no network access or with scripts blocked, which is exactly when a CDN-loaded viewer shows
-nothing. The `Outcomes` table and the full `Survived mutants` list are static HTML and complete on
-their own; the page says so in the fallback text.
+**The plain-HTML summary above the viewer is the important part.** People very often open an artifact
+from a CI run with no network access or with scripts blocked. In exactly that case, a viewer loaded
+from a CDN shows nothing. The `Outcomes` table and the full `Survived mutants` list are static HTML and
+are complete on their own. The fallback text on the page says so.
 
-The survivor list here is **not** capped — unlike markdown, every survivor is listed, each with its
-diff and its coverage note. For the weak suite that means all 255; for the strong suite it is empty,
-since the equivalence pass leaves no survivors behind, and the page says
-`None — every covered mutation was caught.` Equivalent mutants are not listed here at all — that list
-is `console`'s alone — but they are counted in the `Outcomes` table and named in the embedded
-Stryker/mutation-testing-elements JSON below, where each carries `status: "Ignored"`.
+The survivor list here is **not** capped. Unlike markdown, it lists every survivor, each with its diff
+and its coverage note. For the weak suite that means all 255. For the strong suite the list is empty,
+because the equivalence pass leaves no survivors. The page then says
+`None — every covered mutation was caught.`
 
-The embedded JSON is HTML-escaped, so a `</script>` appearing in chart source cannot terminate the
-element early.
+The page does not list equivalent mutants at all. Only `console` has that list. But the `Outcomes`
+table counts them, and the embedded
+Stryker/mutation-testing-elements JSON further down names them, each with `status: "Ignored"`.
+
+The embedded JSON is HTML-escaped, so a `</script>` in the chart source cannot end the element early.
 
 ### `mutation-report.stryker.json`
 
-Conforms to the mutation-testing-elements report schema v2. It embeds each file's full source so the
-viewer can highlight mutations in place, which is why it is large relative to the mutant count.
+This file conforms to the mutation-testing-elements report schema v2. It embeds the full source of
+each file, so the viewer can highlight mutations in place. That is why the file is large relative to
+the mutant count.
 
-Written whenever `html` is requested, because it is useful on its own: it is what other
-mutation-testing tooling consumes, and what you would hand to a hosted dashboard.
+The tool writes it whenever you request `html`, because the file is useful on its own. Other
+mutation-testing tools consume it, and it is what you would hand to a hosted dashboard.
 
 ```json
 {
@@ -846,9 +863,10 @@ mutation-testing tooling consumes, and what you would hand to a hosted dashboard
 }
 ```
 
-*(One file and two of its mutants shown; the real report covers all nine files and 472 mutants.)*
+*(The sample shows one file and two of its mutants. The real report covers all nine files and 472
+mutants.)*
 
-Status mapping onto the schema's vocabulary:
+The tool maps its statuses onto the schema's vocabulary:
 
 | ours | schema |
 |---|---|
@@ -860,24 +878,27 @@ Status mapping onto the schema's vocabulary:
 | `Timeout` | `Timeout` |
 | `Error` | `RuntimeError` |
 
-`Invalid` → `CompileError` is the right fit: that is the schema's term for "the mutation made the
-artefact unbuildable", and like this tool, the viewer excludes it from the score.
+`Invalid` → `CompileError` is the right fit. `CompileError` is the schema's term for "the mutation made
+the artefact unbuildable". Like this tool, the viewer excludes it from the score.
 
-`Equivalent` → `Ignored` is the same kind of fit: the schema's term for a mutant deliberately excluded
-from scoring, which is exactly what an equivalence-pass verdict is. An equivalent mutant's `description`
-also differs from every other status's — `"num-literal: cannot change any rendered manifest"` rather
-than the bare mutator name — so the annotated-source view explains itself without a lookup.
+`Equivalent` → `Ignored` fits in the same way. `Ignored` is the schema's term for a mutant
+deliberately excluded from scoring, and an equivalence-pass verdict is exactly that. The
+`description` of an equivalent mutant also differs from that of every other status. It reads
+`"num-literal: cannot change any rendered manifest"`, not the bare mutator name. Thus the
+annotated-source view explains itself without a lookup.
 
-Three schema-shaped compromises worth knowing:
+The shape of the schema forces three compromises:
 
-- **`killedBy` holds `"Suite > Test"` strings**, not test IDs, since there is no separate test-id
-  namespace here.
+- **`killedBy` holds `"Suite > Test"` strings**, not test IDs, because this tool has no separate
+  namespace for test IDs.
 - **A mutation's end position is clamped to its start line.** A `yaml-key-delete` can span many lines,
-  but only the start line is tracked, so the end column is `start.column + span width`. The viewer
-  highlights the start of the mutation accurately; a multi-line deletion is not fully underlined.
-- **`.tpl` files are reported as `language: "html"`.** No YAML-with-Go-template highlighting mode
-  exists, and `html` at least highlights `{{ }}`. `.yaml` templates are reported as `yaml`, which is
-  why `templates/serviceaccount.yaml` above says `yaml` despite opening with a Go template action.
+  but the tool tracks only the start line. So the end column is `start.column + span width`. The viewer
+  highlights the start of the mutation accurately, but it does not fully underline a multi-line
+  deletion.
+- **`.tpl` files are reported as `language: "html"`.** No highlighting mode exists for YAML with Go
+  templates, and `html` at least highlights `{{ }}`. The report gives `.yaml` templates as `yaml`.
+  That is why `templates/serviceaccount.yaml` above says `yaml`, though it opens with a Go template
+  action.
 
-If a chart file cannot be read back while writing the report, its mutants are still listed against an
-empty source rather than being dropped silently.
+If the tool cannot read back a chart file while it writes the report, it still lists the file's
+mutants against an empty source. It does not drop them silently.

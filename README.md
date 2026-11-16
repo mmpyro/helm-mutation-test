@@ -18,17 +18,17 @@ tests:
           of: Deployment
 ```
 
-Meanwhile the chart can regress `replicas`, lose `imagePullPolicy`, or stop rendering its whole
-`{{- if .Values.ingress.enabled }}` block, and nothing turns red.
+The chart can still regress `replicas`, lose `imagePullPolicy`, or stop rendering its whole
+`{{- if .Values.ingress.enabled }}` block. No test turns red.
 
-This plugin breaks the chart on purpose — one small change at a time — and re-runs your existing
-suites against each one. A change that no test objects to is a **survived mutant**: a precise,
-actionable pointer at a missing assertion.
+This plugin breaks the chart on purpose, one small change at a time. After each change, it runs your
+existing suites again. A change that no test objects to is a **survived mutant**. It points at one
+specific missing assertion.
 
 ## The fixture chart, as a demonstration
 
-`testdata/charts/sample` ships two suites over the same templates. Both pass. `helm unittest` reports
-them as equally green:
+`testdata/charts/sample` ships two suites over the same templates. Both pass, and `helm unittest`
+reports them as equally green:
 
 ```console
 $ helm unittest -f 'tests/weak_test.yaml'   testdata/charts/sample   # PASS, 4 tests
@@ -42,11 +42,11 @@ Mutation testing separates them:
 | `weak_test.yaml` | 6 | 255 | 24 | 173 | 14 | **2.3%** |
 | `strong_test.yaml` | 426 | 0 | 26 | 0 | 20 | **100.0%** |
 
-Neither suite's score is measured against a denominator that includes something it never had a chance
-to catch. `no-coverage` counts mutants in the five templates the weak suite never renders at all, and
-`equivalent` counts mutants that changed the chart's source but provably cannot change any rendered
-manifest, so no assertion anywhere could have caught them either. Both are excluded from the score and
-named explicitly — see [equivalent mutants](docs/concepts.md#equivalent-mutants) and
+Neither score has a mutant in its denominator that the suite had no chance to catch.
+`no-coverage` counts mutants in the five templates that the weak suite never renders. `equivalent`
+counts mutants that changed the chart's source but provably cannot change any rendered manifest. No
+assertion anywhere could catch those either. The score excludes both, and the reports name them
+explicitly. See [equivalent mutants](docs/concepts.md#equivalent-mutants) and
 [why Invalid and NoCoverage are excluded](docs/concepts.md#why-invalid-and-nocoverage-are-excluded).
 
 Run `make demo` to reproduce both.
@@ -66,17 +66,17 @@ helm plugin install --verify=false https://github.com/mmpyro/helm-mutation-test
 helm plugin install --verify=false https://github.com/mmpyro/helm-mutation-test --version v1.2.0
 ```
 
-This downloads a prebuilt binary for linux and macOS on amd64 and arm64, verified against the
-release's `SHA256SUMS`. No Go toolchain needed. The binaries are static, so the linux asset also
-works on musl images such as `alpine/helm`.
+This command downloads a prebuilt binary for linux and macOS on amd64 and arm64. The installer
+verifies it against the release's `SHA256SUMS`. You do not need a Go toolchain. The binaries are
+static, so the linux asset also works on musl images such as `alpine/helm`.
 
-On any other platform, or if the download fails, the install falls back to building from source and
-then does need Go (https://go.dev/dl/).
+On any other platform, or if the download fails, the installer builds from source. Then it needs Go
+(https://go.dev/dl/).
 
 ### Release artifacts
 
-The same binaries can be downloaded directly. Each archive holds a single `helm-mutation-test`
-executable, which also runs on its own outside Helm.
+You can also download the same binaries directly. Each archive holds one `helm-mutation-test`
+executable. The executable also runs on its own, outside Helm.
 
 | platform | v1.2.0 asset |
 |---|---|
@@ -95,7 +95,8 @@ tar -xzf helm-mutation-test_linux_amd64.tar.gz helm-mutation-test
 
 Older versions are on the [releases page](https://github.com/mmpyro/helm-mutation-test/releases).
 
-Either way the chart needs `helm-unittest`-style test suites. Tested against helm-unittest v1.0.3.
+Either way, the chart needs `helm-unittest`-style test suites. The tool is tested against
+helm-unittest v1.0.3.
 
 From a checkout:
 
@@ -103,8 +104,8 @@ From a checkout:
 make install
 ```
 
-A checkout always builds from source rather than downloading, so `make install` runs the tree you
-are editing. `HELM_MUTATION_TEST_BUILD=1` forces that behaviour anywhere.
+A checkout always builds from source and does not download, so `make install` runs the tree that
+you edit. `HELM_MUTATION_TEST_BUILD=1` forces the source build anywhere.
 
 ## Usage
 
@@ -158,10 +159,10 @@ Each survivor is a concrete instruction: add an assertion that would tell those 
 |---|---|
 | `0` | ran successfully (and met `--threshold`, if set) |
 | `1` | the mutation score is below `--threshold` |
-| `2` | could not run — most often the chart's own tests do not pass |
+| `2` | could not run, most often because the chart's own tests do not pass |
 
-The last case is deliberate. A mutation score measured against a failing suite is meaningless, so a
-red baseline is a hard stop rather than a warning.
+The last case is deliberate. A mutation score against a failing suite has no meaning. So a red
+baseline stops the run. It is not a warning.
 
 ## Mutators
 
@@ -178,8 +179,8 @@ red baseline is a hard stop rather than a warning.
 | `comparison-swap` | `eq`↔`ne`, `lt`↔`ge`, `gt`↔`le`, `and`↔`or` |
 | `required-drop` | Strip a `required` guard down to its value |
 
-Templates (including `_helpers.tpl` partials) and `values.yaml` are both mutated. Test files never
-are — mutating the tests would measure nothing about the chart.
+The tool mutates templates (including `_helpers.tpl` partials) and `values.yaml`. It never mutates
+test files, because mutating the tests would measure nothing about the chart.
 
 ## What the score does and does not count
 
@@ -187,43 +188,46 @@ are — mutating the tests would measure nothing about the chart.
 score = killed / (killed + survived)
 ```
 
-Only those two outcomes grade your assertions. Everything else is reported separately, because
-folding it in would flatter the number:
+Only those two outcomes grade your assertions. The tool reports everything else separately, because
+it would flatter the number if the score included it:
 
 | status | why it is excluded |
 |---|---|
-| **No coverage** | No suite renders the mutated template, so no test ever had the chance to catch it. This is a finding in its own right. |
-| **Invalid** | The mutation stopped the chart rendering, so *every* test "caught" it regardless of what it asserts. That grades nothing. A high invalid rate is a bug in this tool, not in your suite. |
-| **Equivalent** | The mutation provably cannot change any rendered manifest — checked automatically on every survivor, on by default. No assertion could ever have caught it either, so it is excluded the same way. |
-| **Timeout** | Evaluation exceeded the per-mutant timeout. |
+| **No coverage** | No suite renders the mutated template, so no test had a chance to catch it. This is a finding on its own. |
+| **Invalid** | The mutation stopped the chart from rendering, so *every* test "caught" it, whatever the test asserts. That grades nothing. A high invalid rate is a bug in this tool, not in your suite. |
+| **Equivalent** | The mutation provably cannot change any rendered manifest. The tool checks every survivor for this automatically, and the check is on by default. No assertion could catch such a mutant either, so the score excludes it the same way. |
+| **Timeout** | The evaluation took longer than the per-mutant timeout. |
 | **Error** | The tool itself failed on that mutant. |
 
-`--max-mutants` also reports how many mutants it dropped. A silently truncated run would read as full
-coverage. `--since` does the same for the mutants outside the diff, and falls back to a full run —
-saying why — when a change such as `values.yaml` or a partial cannot be attributed to particular
-templates. For the same reason a `--shard-count` shard labels its score a slice in every format, refuses
-`--threshold`, and only the `merge` of every shard is graded. `--no-equivalence-check` disables the
-equivalence pass; every format states when that
-happened, the same way it states a truncation.
+`--max-mutants` also reports how many mutants it dropped, because a silently truncated run would read
+as full coverage. `--since` does the same for the mutants outside the diff. Some changes, such as
+`values.yaml` or a partial, cannot be attributed to particular templates. For those, `--since` falls
+back to a full run and says why.
+
+For the same reason, a `--shard-count` shard labels its score a slice
+in every format and refuses `--threshold`. Only the `merge` of every shard gets a grade.
+`--no-equivalence-check` disables the equivalence pass. Every format states when that happened, the
+same way it states a truncation.
 
 ## Reports
 
 `--report` accepts any combination of:
 
-- **console** *(default)* — score, per-mutator and per-file breakdowns, then every survivor as a diff
-  at a `file:line`.
-- **json** — the canonical machine-readable model: every mutant, with which assertion in which test
-  killed it. Parse this if you want to build something on top.
-- **html** — a self-contained page. Renders the interactive
+- **console** *(default)*: the score, per-mutator and per-file breakdowns, then every survivor as a
+  diff at a `file:line`.
+- **json**: the canonical machine-readable model. It holds every mutant, with the assertion and the
+  test that killed it. Parse this format if you want to build something on top.
+- **html**: a self-contained page. It renders the interactive
   [mutation-testing-elements](https://github.com/stryker-mutator/mutation-testing-elements) viewer
-  for annotated source, and carries a plain-HTML summary so the page still says something useful when
-  opened out of a CI artifact with no network. Also writes the standard-schema JSON alongside.
-- **markdown** — sized for `$GITHUB_STEP_SUMMARY` or a PR comment.
-- **junit** — one `testcase` per mutant. **Survived becomes a `failure`**, since a survivor is the
-  defect worth failing a build over; killed mutants pass, and the non-grading statuses are skipped.
-- **sarif** — SARIF 2.1.0 for GitHub code scanning and editor Problems panels. Each survivor is
-  annotated on the line it mutated; each untested template is one alert. Everything left out of the
-  results is named in the run's notifications.
+  for annotated source. It also carries a plain-HTML summary, so the page is still useful when you
+  open it from a CI artifact with no network. This format also writes the standard-schema JSON next
+  to the page.
+- **markdown**: sized for `$GITHUB_STEP_SUMMARY` or a PR comment.
+- **junit**: one `testcase` per mutant. **Survived becomes a `failure`**, because a survivor is the
+  defect worth failing a build over. Killed mutants pass, and the non-grading statuses are skipped.
+- **sarif**: SARIF 2.1.0 for GitHub code scanning and editor Problems panels. Each survivor gets an
+  annotation on the line it mutated. Each untested template is one alert. The run's notifications
+  name everything that the results leave out.
 
 ## How it works
 
@@ -231,25 +235,27 @@ happened, the same way it states a truncation.
 discover → baseline → coverage index → generate mutants → evaluate (workers) → report
 ```
 
-**Mutations are located with a parser but applied as byte edits.** Templates are parsed with Go's
-`text/template/parse` (using `SkipFuncCheck`, so no sprig or Helm funcmap is needed) and `values.yaml`
-with `yaml.v3` node positions. The edit then replaces an exact byte range in the original file, so
-formatting — including Helm's whitespace-sensitive `{{-` trim markers — survives untouched.
+**A parser locates each mutation, and a byte edit applies it.** The tool parses templates with Go's
+`text/template/parse`. It uses `SkipFuncCheck`, so it needs no sprig or Helm funcmap. It reads
+`values.yaml` with `yaml.v3` node positions. The edit then replaces an exact byte range in the
+original file. So the formatting survives untouched, including Helm's whitespace-sensitive `{{-` trim
+markers.
 
-**Suites are selected by coverage.** helm-unittest suites declare which templates they render, so a
-mutant in `ingress.yaml` only runs the suites that render `ingress.yaml`. That is both faster and more
-honest: it turns "no suite renders this template at all" into a reportable finding instead of a
-survivor.
+**Coverage selects the suites.** helm-unittest suites declare which templates they render. So a
+mutant in `ingress.yaml` runs only the suites that render `ingress.yaml`. This is faster, and it is
+also more honest. It turns "no suite renders this template at all" into a finding that the tool can
+report, instead of a survivor.
 
-**Kill attribution comes from driving `TestSuite.RunV3` directly** rather than helm-unittest's
-top-level runner, which returns only a bool and prints. The lower-level call returns the full result
-tree, which is what lets the tool name the exact assertion that caught each mutation — and distinguish
-a failed assertion (a real kill) from a render error (which every test "catches", and so grades
-nothing).
+**Kill attribution comes from a direct call to `TestSuite.RunV3`.** The tool does not use
+helm-unittest's top-level runner, because that runner only prints and returns a bool. The lower-level
+call returns the full result tree. With that tree, the tool can name the exact assertion that caught
+each mutation. It can also tell a failed assertion (a real kill) from a render error. Every test
+"catches" a render error, so a render error grades nothing.
 
 ### Why workers are separate processes
 
-helm-unittest cannot safely render concurrently within one process. `TestJob.capabilitiesV3` does:
+helm-unittest cannot render safely in parallel inside one process. `TestJob.capabilitiesV3` does
+this:
 
 ```go
 capabilities := v3util.DefaultCapabilities   // a *Capabilities POINTER
@@ -257,13 +263,13 @@ capabilities.KubeVersion = ...               // writes through the shared pointe
 ```
 
 `chartutil.DefaultCapabilities` is a package-level pointer in Helm, so every test job mutates
-process-global state. That is a data race, and a correctness bug too: a suite declaring a custom
-`capabilities.majorVersion` leaks that version into suites rendering concurrently. The same code is
-present in the latest release (v1.1.2), so upgrading is not a fix.
+process-global state. That is a data race. It is also a correctness bug: a suite that declares a
+custom `capabilities.majorVersion` leaks that version into suites that render at the same time. The
+latest release (v1.1.2) has the same code, so an upgrade does not fix it.
 
-Each worker therefore runs in its own process, where that global is private. Workers are long-lived
-and stream jobs, so process startup is paid once per worker rather than once per mutant. A single
-worker (`-p 1`) still runs in-process, where no concurrency exists. `-p 1` and `-p 8` are verified to
+So each worker runs in its own process, where that global is private. Workers are long-lived and
+stream jobs. Each worker pays the process startup cost once, not once per mutant. A single worker
+(`-p 1`) still runs in-process, where no concurrency exists. `-p 1` and `-p 8` are verified to
 produce identical results.
 
 ## Development
@@ -286,9 +292,10 @@ make demo    # score the fixture chart with both suites
 
 ## Known limits
 
-- Test suites must be discoverable by `-f`; charts nesting suites in subdirectories need an explicit
-  glob (`-f 'tests/**/*_test.yaml'`).
+- Test suites must be discoverable by `-f`. Charts that nest suites in subdirectories need an
+  explicit glob (`-f 'tests/**/*_test.yaml'`).
 - A suite file that fails to parse aborts the run, matching helm-unittest's own behaviour.
-- Mutation is one change at a time; no higher-order mutants.
-- `--since` treats any change it cannot attribute (values, partials, `Chart.yaml`, subcharts, files
-  read via `.Files.Get`) as a reason for a full run, so PRs touching shared files gain no speedup.
+- Mutation is one change at a time. There are no higher-order mutants.
+- `--since` treats any change that it cannot attribute (values, partials, `Chart.yaml`, subcharts,
+  files read via `.Files.Get`) as a reason for a full run. So PRs that touch shared files get no
+  speedup.
